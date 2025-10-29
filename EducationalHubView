@@ -1,0 +1,219 @@
+
+
+import SwiftUICore
+import SwiftUI
+
+struct EducationalHubView: View {
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.95, green: 0.98, blue: 0.96),
+                        Color(red: 0.88, green: 0.96, blue: 0.91)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .edgesIgnoringSafeArea(.all)
+                
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Header
+                        VStack {
+                            Text("Sustainable Food Guide")
+                                .font(.custom("Avenir-Heavy", size: 28))
+                                .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.3))
+                            
+                            Text("Small changes make big differences")
+                                .font(.custom("Avenir-Medium", size: 16))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.top, 30)
+                        
+                        // Card 1: Composting
+                        NavigationLink(destination: CompostingGuideView()) {
+                            FeatureCard(
+                                title: "Composting 101",
+                                subtitle: "Turn waste into garden gold",
+                                icon: "leaf.fill",
+                                color: Color(red: 0.35, green: 0.71, blue: 0.55)
+                            )
+                        }
+                        
+                        // Card 2: Shelf Life
+                        NavigationLink(destination: ShelfLifeView()) {
+                            FeatureCard(
+                                title: "Shelf-Life Extension",
+                                subtitle: "Make food last longer",
+                                icon: "clock.fill",
+                                color: Color(red: 0.47, green: 0.78, blue: 0.66)
+                            )
+                        }
+                        
+                        // Card 3: Climate Impact
+                        NavigationLink(destination: ClimateImpactView()) {
+                            FeatureCard(
+                                title: "Climate Impact",
+                                subtitle: "Your food's carbon footprint",
+                                icon: "globe.americas.fill",
+                                color: Color(red: 0.25, green: 0.63, blue: 0.48)
+                            )
+                        }
+                        
+                        // Inspirational footer
+                        VStack(spacing: 8) {
+                            Text("Did You Know?")
+                                .font(.custom("Avenir-Black", size: 18))
+                                .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.3))
+                            
+                            Text("If 25% of households reduced food waste, it would equal planting 100 million trees annually")
+                                .font(.custom("Avenir-Medium", size: 14))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(.gray)
+                                .padding(.horizontal, 20)
+                        }
+                        .padding(.top, 10)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
+                }
+            }
+            .navigationBarHidden(true)
+        }
+        .accentColor(Color(red: 0.35, green: 0.71, blue: 0.55))
+    }
+}
+
+// Reusable Card Component
+struct FeatureCard: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let color: Color
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(color)
+                    .clipShape(Circle())
+                
+                Text(title)
+                    .font(.custom("Avenir-Heavy", size: 20))
+                    .foregroundColor(Color(red: 0.2, green: 0.4, blue: 0.3))
+                
+                Text(subtitle)
+                    .font(.custom("Avenir-Medium", size: 14))
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .foregroundColor(color)
+        }
+        .padding(20)
+        .background(Color.white)
+        .cornerRadius(15)
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
+    }
+}
+
+// Keep your existing detailed views (CompostingGuideView, ShelfLifeView, ClimateImpactView)
+
+// MARK: - Detailed Views
+
+struct CompostingGuideView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Composting 101")
+                    .font(.custom("Avenir-Medium", size: 28))
+                    .foregroundColor(Color(red: 0.47, green: 0.78, blue: 0.66))
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Step-by-Step Guide:").bold()
+                    Text("1. Collect kitchen scraps (fruit/vegetable peels, coffee grounds, eggshells) in a sealed container")
+                    Text("2. Balance with 'browns' (2:1 ratio of browns to greens):\n   • Browns: dried leaves, cardboard, paper\n   • Greens: food scraps, grass clippings")
+                    Text("3. Choose a well-drained outdoor space (3'x3' minimum)")
+                    Text("4. Layer materials, keeping it moist like a wrung-out sponge")
+                    Text("5. Turn pile weekly for aeration")
+                    Text("6. In 2-6 months, harvest nutrient-rich compost")
+                }
+                .font(.custom("Avenir-Medium", size: 16))
+                
+                Text("Small actions matter: Composting just 1kg of food waste weekly prevents ~100kg of methane emissions annually.")
+                    .italic()
+                    .padding(.top)
+            }
+            .padding()
+        }
+    }
+}
+
+struct ShelfLifeView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Shelf-Life Extension")
+                    .font(.custom("Avenir-Medium", size: 28))
+                    .foregroundColor(Color(red: 0.47, green: 0.78, blue: 0.66))
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Produce Storage Tips:").bold()
+                    Text("• Herbs: Store upright in water (like flowers)\n• Berries: Vinegar wash (3:1 water:vinegar)\n• Greens: Dry completely + cloth-lined container")
+                    
+                    Divider().padding(.vertical)
+                    
+                    Text("Preservation Methods:").bold()
+                    Text("• Acidification: Pickling with vinegar\n• Dehydration: Remove moisture\n• Fermentation: Beneficial bacteria\n• Blanching + Freezing: Stops enzyme action")
+                    
+                    Divider().padding(.vertical)
+                    
+                    Text("Did You Know? Proper storage can extend produce life by 2-5x, reducing household food waste by 30%.")
+                        .italic()
+                }
+                .font(.custom("Avenir-Medium", size: 16))
+            }
+            .padding()
+        }
+    }
+}
+
+struct ClimateImpactView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Climate Impact")
+                    .font(.custom("Avenir-Medium", size: 28))
+                    .foregroundColor(Color(red: 0.47, green: 0.78, blue: 0.66))
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Food Waste Facts:").bold()
+                    Text("• 8-10% global GHG emissions come from food waste\n• Rotting food emits methane (25x more potent than CO₂)\n• Wasted resources: 25% of freshwater used to grow uneaten food")
+                    
+                    Divider().padding(.vertical)
+                    
+                    Text("Systemic Impact:").bold()
+                    Text("1. Production: Wasted land, water, fertilizers\n2. Transportation: Unnecessary emissions\n3. Disposal: Landfill methane emissions")
+                    
+                    Divider().padding(.vertical)
+                    
+                    Text("Small Changes Add Up:").bold()
+                    Text("• Meal planning prevents over-purchasing\n• Proper storage reduces spoilage\n• Composting captures nutrients\n• Ugly produce tastes the same!")
+                    
+                    Text("If all US households composted, it would equal removing 7.8 million cars from roads.")
+                        .italic()
+                        .padding(.top)
+                }
+                .font(.custom("Avenir-Medium", size: 16))
+            }
+            .padding()
+        }
+    }
+}
