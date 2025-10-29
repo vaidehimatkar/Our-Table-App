@@ -1,0 +1,2625 @@
+import SwiftUI
+import PDFKit
+import UIKit
+import Foundation
+
+
+struct Ingredient: Identifiable {
+    let id = UUID()
+    let name: String
+    let amount: Double           // Base amount for recipe
+    let unit: String            // Unit of measurement (cups, tsp, pieces, etc.)
+    let carbonFootprint: Double  // kg CO2 per serving
+    let spoilageRisk: Double     // 0.0 to 1.0
+    let cost: Double             // $ per serving
+}
+struct Recipe: Identifiable {
+    let id = UUID()
+    let name: String
+    let ingredients: [Ingredient]
+    let cookTime: Int            // minutes
+    let dietaryTags: [String]    // e.g. "vegan", "gluten-free"
+    let chronicConditionAvoid: [String] // e.g. "diabetes"
+    let directions: [String]     // Step-by-step cooking directions
+    let baseServingSize: Int     // Base serving size (default 1)
+    let mealType: String  // "breakfast", "lunch", or "dinner"
+
+
+    
+    var totalCost: Double {
+        ingredients.reduce(0) { $0 + $1.cost }
+    }
+    
+    var totalCarbonFootprint: Double {
+        ingredients.reduce(0) { $0 + $1.carbonFootprint }
+    }
+    
+    var averageSpoilageRisk: Double {
+        guard !ingredients.isEmpty else { return 0 }
+        return ingredients.reduce(0) { $0 + $1.spoilageRisk } / Double(ingredients.count)
+    }
+    
+    var totalWasteReduction: Double {
+        ingredients.reduce(0) { $0 + ($1.spoilageRisk * 0.2) } // 0.2 lbs waste per spoilage risk point
+    }
+    
+    // New computed property for dietary emoji
+    var dietaryEmoji: String {
+        if dietaryTags.map({ $0.lowercased() }).contains("vegan") {
+            return "🌱"
+        }
+        else {
+            return ""
+        }
+    }
+    
+    // Methods to calculate scaled values based on serving size
+    func scaledCost(for servingSize: Int) -> Double {
+        let multiplier = Double(servingSize) / Double(baseServingSize)
+        return totalCost * multiplier
+    }
+    
+    func scaledCarbonFootprint(for servingSize: Int) -> Double {
+        let multiplier = Double(servingSize) / Double(baseServingSize)
+        return totalCarbonFootprint * multiplier
+    }
+    
+    func scaledWasteReduction(for servingSize: Int) -> Double {
+        let multiplier = Double(servingSize) / Double(baseServingSize)
+        return totalWasteReduction * multiplier
+    }
+    
+    func scaledIngredients(for servingSize: Int) -> [ScaledIngredient] {
+        let multiplier = Double(servingSize) / Double(baseServingSize)
+        return ingredients.map { ingredient in
+            ScaledIngredient(
+                id: ingredient.id,
+                name: ingredient.name,
+                baseAmount: ingredient.amount,
+                unit: ingredient.unit,
+                scaledAmount: ingredient.amount * multiplier,
+                originalCost: ingredient.cost,
+                originalCarbonFootprint: ingredient.carbonFootprint,
+                scaledCost: ingredient.cost * multiplier,
+                scaledCarbonFootprint: ingredient.carbonFootprint * multiplier,
+                spoilageRisk: ingredient.spoilageRisk,
+                servingMultiplier: multiplier
+            )
+        }
+    }
+}
+struct ScaledIngredient: Identifiable {
+    let id: UUID
+    let name: String
+    let baseAmount: Double
+    let unit: String
+    let scaledAmount: Double
+    let originalCost: Double
+    let originalCarbonFootprint: Double
+    let scaledCost: Double
+    let scaledCarbonFootprint: Double
+    let spoilageRisk: Double
+    let servingMultiplier: Double
+    
+    var displayAmount: String {
+        // Format the amount nicely
+        let formattedAmount: String
+        if scaledAmount == floor(scaledAmount) {
+            formattedAmount = String(format: "%.0f", scaledAmount)
+        } else if scaledAmount < 1 {
+            // For fractions, show as decimal
+            formattedAmount = String(format: "%.2f", scaledAmount)
+        } else {
+            formattedAmount = String(format: "%.1f", scaledAmount)
+        }
+        
+        return "\(formattedAmount) \(unit)"
+    }
+    
+    var displayName: String {
+        return "\(displayAmount) \(name)"
+    }
+}
+
+
+struct RecipeCard: View {
+    let recipe: Recipe
+    @State private var currentServingSize: Int
+    @State private var showRecipeDirections = false
+    
+    init(recipe: Recipe) {
+        self.recipe = recipe
+        self._currentServingSize = State(initialValue: recipe.baseServingSize)
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Recipe Header
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(recipe.name)
+                            .font(.custom("Avenir-Heavy", size: 18))
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        Text(recipe.dietaryEmoji)
+                            .font(.title2)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "clock.fill")
+                            .foregroundColor(.white.opacity(0.9))
+                        Text("\(recipe.cookTime) mins")
+                            .font(.custom("Avenir-Medium", size: 12))
+                            .foregroundColor(.white.opacity(0.9))
+                        
+                        Spacer()
+                        
+                        Image(systemName: "dollarsign.circle.fill")
+                            .foregroundColor(.white.opacity(0.9))
+                        Text(String(format: "$%.2f", recipe.scaledCost(for: currentServingSize)))
+                            .font(.custom("Avenir-Medium", size: 12))
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    showRecipeDirections = true
+                }) {
+                    HStack {
+                        Image(systemName: "book.circle.fill")
+                        Text("Recipe")
+                            .font(.custom("Avenir-Black", size: 16))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.8), Color.green.opacity(0.6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(20)
+                    .shadow(color: Color.black.opacity(0.2), radius: 3, x: 0, y: 2)
+                }
+            }
+            .padding()
+            .background(
+                LinearGradient(
+                    colors: [Color.green.opacity(0.7), Color.green.opacity(0.5)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .cornerRadius(16)
+            
+            // Serving Size Controls
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Serving Size")
+                    .font(.custom("Avenir-Heavy", size: 16))
+                    .fontWeight(.medium)
+                    .foregroundColor(.green.opacity(0.8))
+                
+                HStack {
+                    Button(action: {
+                        if currentServingSize > 1 {
+                            currentServingSize -= 1
+                        }
+                    }) {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundColor(currentServingSize > 1 ? .green.opacity(0.7) : .gray.opacity(0.5))
+                            .font(.title2)
+                    }
+                    .disabled(currentServingSize <= 1)
+                    
+                    Spacer()
+                    
+                    VStack {
+                        Text("\(currentServingSize)")
+                            .font(.custom("Avenir-Black", size: 24))
+                            .fontWeight(.bold)
+                            .foregroundColor(.green.opacity(0.8))
+                        Text("serving\(currentServingSize > 1 ? "s" : "")")
+                            .font(.custom("Avenir-Medium", size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        if currentServingSize < 10 {
+                            currentServingSize += 1
+                        }
+                    }) {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundColor(currentServingSize < 10 ? .green.opacity(0.7) : .gray.opacity(0.5))
+                            .font(.title2)
+                    }
+                    .disabled(currentServingSize >= 10)
+                }
+                .padding(.horizontal, 12)
+                
+                // Custom styled cost and environmental impact boxes
+                HStack(spacing: 12) {
+                    // Cost Box
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundColor(.white)
+                                .font(.system(size: 16))
+                            Text("Total Cost")
+                                .font(.custom("Avenir-Medium", size: 12))
+                                .foregroundColor(.white)
+                        }
+                        Text(String(format: "$%.2f", recipe.scaledCost(for: currentServingSize)))
+                            .font(.custom("Avenir-Black", size: 16))
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.green.opacity(0.7))
+                            .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                    )
+                    
+                    // Environmental Impact Box
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "leaf.fill")
+                                .foregroundColor(.white)
+                                .font(.system(size: 16))
+                            Text("CO2 Impact")
+                                .font(.custom("Avenir-Medium", size: 12))
+                                .foregroundColor(.white)
+                        }
+                        Text(String(format: "%.1f kg", recipe.scaledCarbonFootprint(for: currentServingSize)))
+                            .font(.custom("Avenir-Black", size: 16))
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.green.opacity(0.7))
+                            .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                    )
+                    
+                    // Waste Reduction Box
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "trash.slash.fill")
+                                .foregroundColor(.white)
+                                .font(.system(size: 16))
+                            Text("Waste Saved")
+                                .font(.custom("Avenir-Medium", size: 12))
+                                .foregroundColor(.white)
+                        }
+                        Text(String(format: "%.1f lbs", recipe.scaledWasteReduction(for: currentServingSize)))
+                            .font(.custom("Avenir-Black", size: 16))
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.green.opacity(0.7))
+                            .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                    )
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.8))
+                    .shadow(color: Color.green.opacity(0.1), radius: 6, x: 0, y: 3)
+            )
+            
+            // Ingredients with scaled amounts
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(recipe.scaledIngredients(for: currentServingSize)) { scaledIngredient in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(scaledIngredient.displayName)
+                                    .font(.custom("Avenir-Medium", size: 14))
+                                    .foregroundColor(.primary)
+                                
+                                if currentServingSize != recipe.baseServingSize {
+                                    Text("(Base: \(String(format: "%.1f", scaledIngredient.baseAmount)) \(scaledIngredient.unit))")
+                                        .font(.custom("Avenir-Book", size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(String(format: "$%.2f", scaledIngredient.scaledCost))
+                                    .font(.custom("Avenir-Heavy", size: 11))
+                                    .foregroundColor(.green.opacity(0.8))
+                                
+                                Text(String(format: "%.2f kg CO2", scaledIngredient.scaledCarbonFootprint))
+                                    .font(.custom("Avenir-Heavy", size: 11))
+                                    .foregroundColor(.orange.opacity(0.8))
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.6))
+                        )
+                        
+                        if scaledIngredient.id != recipe.scaledIngredients(for: currentServingSize).last?.id {
+                            Divider()
+                                .opacity(0.3)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Image(systemName: "list.bullet.circle.fill")
+                        .foregroundColor(.green.opacity(0.7))
+                        .font(.system(size: 18))
+                    Text("Ingredients (\(currentServingSize) serving\(currentServingSize > 1 ? "s" : ""))")
+                        .font(.custom("Avenir-Heavy", size: 16))
+                        .foregroundColor(.green.opacity(0.8))
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.8))
+                    .shadow(color: Color.green.opacity(0.1), radius: 6, x: 0, y: 3)
+            )
+            .accentColor(.green.opacity(0.7))
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.9, green: 0.98, blue: 0.9),
+                            Color(red: 0.85, green: 0.96, blue: 0.85)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: Color.green.opacity(0.2), radius: 8, x: 0, y: 4)
+        )
+        .sheet(isPresented: $showRecipeDirections) {
+            RecipeDirectionsView(recipe: recipe, isPresented: $showRecipeDirections)
+        }
+    }
+}
+
+struct RecipeDirectionsView: View {
+    let recipe: Recipe
+    @Binding var isPresented: Bool
+    @State private var currentServingSize: Int
+    
+    init(recipe: Recipe, isPresented: Binding<Bool>) {
+        self.recipe = recipe
+        self._isPresented = isPresented
+        self._currentServingSize = State(initialValue: recipe.baseServingSize)
+    }
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Recipe Header
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text(recipe.name)
+                                .font(.custom("Avenir-Black", size: 28))
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            Text(recipe.dietaryEmoji)
+                                .font(.title)
+                        }
+                        
+                        HStack {
+                            Image(systemName: "clock.fill")
+                                .foregroundColor(.white.opacity(0.9))
+                            Text("\(recipe.cookTime) mins")
+                                .font(.custom("Avenir-Medium", size: 14))
+                                .foregroundColor(.white.opacity(0.9))
+                            
+                            Spacer()
+                            
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundColor(.white.opacity(0.9))
+                            Text(String(format: "$%.2f", recipe.scaledCost(for: currentServingSize)))
+                                .font(.custom("Avenir-Medium", size: 14))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                        
+                        // Dietary tags
+                        if !recipe.dietaryTags.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack {
+                                    ForEach(recipe.dietaryTags, id: \.self) { tag in
+                                        Text(tag.capitalized)
+                                            .font(.custom("Avenir-Heavy", size: 12))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 15)
+                                                    .fill(Color.white.opacity(0.2))
+                                            )
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.7), Color.green.opacity(0.5)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(20)
+                    
+                    // Serving Size Controls in Recipe Details
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Adjust Serving Size")
+                            .font(.custom("Avenir-Black", size: 18))
+                            .fontWeight(.semibold)
+                            .foregroundColor(.green.opacity(0.8))
+                        
+                        HStack {
+                            Button(action: {
+                                if currentServingSize > 1 {
+                                    currentServingSize -= 1
+                                }
+                            }) {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(currentServingSize > 1 ? .green.opacity(0.7) : .gray.opacity(0.5))
+                                    .font(.title2)
+                            }
+                            .disabled(currentServingSize <= 1)
+                            
+                            Spacer()
+                            
+                            VStack {
+                                Text("\(currentServingSize)")
+                                    .font(.custom("Avenir-Black", size: 24))
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.green.opacity(0.8))
+                                Text("serving\(currentServingSize > 1 ? "s" : "")")
+                                    .font(.custom("Avenir-Medium", size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                if currentServingSize < 10 {
+                                    currentServingSize += 1
+                                }
+                            }) {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(currentServingSize < 10 ? .green.opacity(0.7) : .gray.opacity(0.5))
+                                    .font(.title2)
+                            }
+                            .disabled(currentServingSize >= 10)
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        HStack(spacing: 12) {
+                            // Cost Box
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "dollarsign.circle.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 16))
+                                    Text("Total Cost")
+                                        .font(.custom("Avenir-Medium", size: 12))
+                                        .foregroundColor(.white)
+                                }
+                                Text(String(format: "$%.2f", recipe.scaledCost(for: currentServingSize)))
+                                    .font(.custom("Avenir-Black", size: 16))
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.green.opacity(0.7))
+                                    .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                            )
+                            
+                            // Environmental Impact Box
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "leaf.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 16))
+                                    Text("CO2 Impact")
+                                        .font(.custom("Avenir-Medium", size: 12))
+                                        .foregroundColor(.white)
+                                }
+                                Text(String(format: "%.1f kg", recipe.scaledCarbonFootprint(for: currentServingSize)))
+                                    .font(.custom("Avenir-Black", size: 16))
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.green.opacity(0.7))
+                                    .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                            )
+                            
+                            // Waste Reduction Box
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "trash.slash.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 16))
+                                    Text("Waste Saved")
+                                        .font(.custom("Avenir-Medium", size: 12))
+                                        .foregroundColor(.white)
+                                }
+                                Text(String(format: "%.1f lbs", recipe.scaledWasteReduction(for: currentServingSize)))
+                                    .font(.custom("Avenir-Black", size: 16))
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.green.opacity(0.7))
+                                    .shadow(color: Color.green.opacity(0.3), radius: 4, x: 0, y: 2)
+                            )
+                        }
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(0.8))
+                            .shadow(color: Color.green.opacity(0.1), radius: 6, x: 0, y: 3)
+                    )
+                    
+                    // Ingredients Section with scaled amounts
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "list.bullet.circle.fill")
+                                .foregroundColor(.green.opacity(0.7))
+                                .font(.system(size: 20))
+                            Text("Ingredients (\(currentServingSize) serving\(currentServingSize > 1 ? "s" : ""))")
+                                .font(.custom("Avenir-Black", size: 18))
+                                .fontWeight(.semibold)
+                                .foregroundColor(.green.opacity(0.8))
+                        }
+                        
+                        VStack(spacing: 8) {
+                            ForEach(recipe.scaledIngredients(for: currentServingSize)) { scaledIngredient in
+                                HStack {
+                                    Image(systemName: "circle.fill")
+                                        .font(.system(size: 6))
+                                        .foregroundColor(.green.opacity(0.7))
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(scaledIngredient.displayName)
+                                            .font(.custom("Avenir-Medium", size: 14))
+                                        
+                                        if currentServingSize != recipe.baseServingSize {
+                                            Text("(Base: \(String(format: "%.1f", scaledIngredient.baseAmount)) \(scaledIngredient.unit))")
+                                                .font(.custom("Avenir-Book", size: 11))
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(String(format: "$%.2f", scaledIngredient.scaledCost))
+                                            .font(.custom("Avenir-Heavy", size: 11))
+                                            .foregroundColor(.green.opacity(0.8))
+                                        
+                                        Text(String(format: "%.2f kg", scaledIngredient.scaledCarbonFootprint))
+                                            .font(.custom("Avenir-Heavy", size: 11))
+                                            .foregroundColor(.orange.opacity(0.8))
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.white.opacity(0.6))
+                                )
+                                .padding(.leading, 12)
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(0.8))
+                            .shadow(color: Color.green.opacity(0.1), radius: 6, x: 0, y: 3)
+                    )
+                    
+                    // Directions Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "book.circle.fill")
+                                .foregroundColor(.green.opacity(0.7))
+                                .font(.system(size: 20))
+                            Text("Cooking Directions")
+                                .font(.custom("Avenir-Black", size: 18))
+                                .fontWeight(.semibold)
+                                .foregroundColor(.green.opacity(0.8))
+                        }
+                        
+                        VStack(spacing: 12) {
+                            ForEach(Array(recipe.directions.enumerated()), id: \.offset) { index, direction in
+                                HStack(alignment: .top, spacing: 16) {
+                                    Text("\(index + 1)")
+                                        .font(.custom("Avenir-Black", size: 14))
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.white)
+                                        .frame(width: 28, height: 28)
+                                        .background(
+                                            LinearGradient(
+                                                colors: [Color.green.opacity(0.8), Color.green.opacity(0.6)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .clipShape(Circle())
+                                        .shadow(color: Color.green.opacity(0.3), radius: 2, x: 0, y: 1)
+                                    
+                                    Text(direction)
+                                        .font(.custom("Avenir-Medium", size: 14))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .foregroundColor(.primary)
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.white.opacity(0.6))
+                                )
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(0.8))
+                            .shadow(color: Color.green.opacity(0.1), radius: 6, x: 0, y: 3)
+                    )
+                }
+                .padding(20)
+            }
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.9, green: 0.98, blue: 0.9),
+                        Color(red: 0.85, green: 0.96, blue: 0.85)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .navigationTitle("Recipe")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                trailing: Button("Done") {
+                    isPresented = false
+                }
+                .font(.custom("Avenir-Heavy", size: 16))
+                .foregroundColor(.green.opacity(0.8))
+            )
+        }
+    }
+}
+
+// Example usage view with updated background
+struct RecipeCardExampleView: View {
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                LazyVStack(spacing: 20) {
+                    ForEach(Recipe.sampleRecipes) { recipe in
+                        RecipeCard(recipe: recipe)
+                    }
+                }
+                .padding(20)
+            }
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.9, green: 0.98, blue: 0.9),
+                        Color(red: 0.85, green: 0.96, blue: 0.85)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .navigationTitle("Recipes")
+            .navigationBarTitleDisplayMode(.large)
+        }
+    }
+}
+
+// Updated sample recipes with proper measurements
+extension Recipe {
+    static let sampleRecipes: [Recipe] = [
+        Recipe(
+            name: "Banana Oat Pancakes",
+            ingredients: [
+                Ingredient(name: "Rolled Oats", amount: 1.0, unit: "cup", carbonFootprint: 1.2, spoilageRisk: 0.1, cost: 0.8),
+                Ingredient(name: "Ripe Bananas", amount: 2.0, unit: "pieces", carbonFootprint: 0.5, spoilageRisk: 0.6, cost: 0.6),
+                Ingredient(name: "Eggs", amount: 2.0, unit: "pieces", carbonFootprint: 4.2, spoilageRisk: 0.3, cost: 0.5),
+                Ingredient(name: "Milk", amount: 0.5, unit: "cup", carbonFootprint: 3.8, spoilageRisk: 0.4, cost: 0.4),
+                Ingredient(name: "Vanilla Extract", amount: 1.0, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.1, cost: 0.2),
+                Ingredient(name: "Cinnamon", amount: 0.5, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.1, cost: 0.1)
+            ],
+            cookTime: 15,
+            dietaryTags: ["vegetarian", "breakfast"],
+            chronicConditionAvoid: ["vegan"],
+            directions: [
+                "Blend oats in a blender until they form a fine flour.",
+                "Add bananas, eggs, milk, vanilla, and cinnamon to the blender.",
+                "Blend until smooth batter forms.",
+                "Heat a non-stick pan over medium heat.",
+                "Pour 1/4 cup batter per pancake into the pan.",
+                "Cook for 2-3 minutes until bubbles form, then flip.",
+                "Cook for another 2 minutes until golden brown.",
+                "Serve warm with your favorite toppings."
+            ],
+            baseServingSize: 2,
+
+            mealType: "breakfast"
+
+        ),
+        Recipe(
+                 name: "Beef Chili",
+                 ingredients: [
+                   Ingredient(name: "Ground Beef", amount: 1, unit: "pound", carbonFootprint: 7.0, spoilageRisk: 0.3, cost: 4.0),
+                   Ingredient(name: "Kidney Beans", amount: 15, unit: "oz can", carbonFootprint: 0.8, spoilageRisk: 0.15, cost: 1.5),
+                   Ingredient(name: "Tomato Paste", amount: 6, unit: "oz can", carbonFootprint: 0.4, spoilageRisk: 0.2, cost: 0.7),
+                   Ingredient(name: "Chili Powder", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.05, cost: 0.1),
+                   Ingredient(name: "Ground Cumin", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.05, cost: 0.05),
+                   Ingredient(name: "Water", amount: 1, unit: "cup", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.0),
+                   Ingredient(name: "Salt", amount: 0.5, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.02),
+                   Ingredient(name: "Black Pepper", amount: 0.25, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.02),
+                 ],
+                 cookTime: 35,
+                 dietaryTags: ["dinner"],
+                 chronicConditionAvoid: [],
+                 directions: [
+                   "In a pot, brown the ground beef over medium heat.",
+                   "Drain excess fat if needed.",
+                   "Add drained kidney beans and tomato paste.",
+                   "Add chili powder, cumin, salt, and pepper to taste.",
+                   "Add water to desired consistency.",
+                   "Simmer on low for 30-40 minutes, stirring occasionally.",
+                   "Serve warm with bread or rice."
+                 ],
+                 baseServingSize: 2,
+
+                 mealType: "dinner"
+
+               ),
+               Recipe(
+                 name: "Cauliflower Curry",
+                 ingredients: [
+                   Ingredient(name: "Cauliflower", amount: 1, unit: "medium head", carbonFootprint: 1.5, spoilageRisk: 0.3, cost: 2.0),
+                   Ingredient(name: "Coconut Milk", amount: 1, unit: "cup", carbonFootprint: 2.2, spoilageRisk: 0.1, cost: 1.5),
+                   Ingredient(name: "Curry Powder", amount: 2, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.05, cost: 0.2),
+                   Ingredient(name: "Turmeric", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.05, cost: 0.1),
+                   Ingredient(name: "Cumin", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.05, cost: 0.1),
+                   Ingredient(name: "Salt", amount: 0.5, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.02),
+                   Ingredient(name: "Black Pepper", amount: 0.25, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.02),
+                 ],
+                 cookTime: 30,
+                 dietaryTags: ["vegan", "gluten-free", "dinner"],
+                 chronicConditionAvoid: [],
+                 directions: [
+                   "Cut cauliflower into florets and rinse.",
+                   "In a pot, add a small amount of oil and your chosen spices (curry powder, turmeric, cumin).",
+                   "Add cauliflower and sauté for 5 minutes.",
+                   "Pour in coconut milk and stir well.",
+                   "Simmer on low heat for 20-25 minutes until cauliflower is tender.",
+                   "Season with salt and pepper to taste.",
+                   "Serve with rice or naan."
+                 ],
+                 baseServingSize: 4,
+
+                 mealType: "dinner"
+
+               ),
+               Recipe(
+                 name: "White Bean Hummus Wraps",
+                 ingredients: [
+                   Ingredient(name: "White Beans", amount: 1, unit: "15 oz can", carbonFootprint: 0.8, spoilageRisk: 0.15, cost: 1.5),
+                   Ingredient(name: "Lemon Juice", amount: 2, unit: "tbsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.2),
+                   Ingredient(name: "Olive Oil", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.3),
+                   Ingredient(name: "Wrap Bread", amount: 2, unit: "wraps", carbonFootprint: 0.3, spoilageRisk: 0.1, cost: 1.0),
+                   Ingredient(name: "Salt", amount: 0.25, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.01),
+                   Ingredient(name: "Black Pepper", amount: 0.1, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.01),
+                 ],
+                 cookTime: 10,
+                 dietaryTags: ["vegan", "quick", "lunch"],
+                 chronicConditionAvoid: [],
+                 directions: [
+                   "Drain and rinse white beans.",
+                   "Mash beans with lemon juice, olive oil, salt, and pepper until creamy.",
+                   "Spread hummus on wrap bread.",
+                   "Add fresh veggies like lettuce, cucumber, and tomato if desired.",
+                   "Roll up and serve."
+                 ],
+                 baseServingSize: 2,
+
+                 mealType: "lunch"
+
+               ),
+        Recipe(
+            name: "Lentil and Brown Rice Pilaf",
+            ingredients: [
+                Ingredient(name: "Dried Brown Lentils", amount: 0.5, unit: "cup", carbonFootprint: 0.8, spoilageRisk: 0.0, cost: 0.5),
+                Ingredient(name: "Brown Rice", amount: 0.5, unit: "cup", carbonFootprint: 0.7, spoilageRisk: 0.0, cost: 0.4),
+                Ingredient(name: "Dried Onion Flakes", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Cumin", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Low-Sodium Vegetable Bouillon Cube", amount: 1, unit: "cube", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.2),
+                Ingredient(name: "Olive Oil (optional)", amount: 1, unit: "tsp", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.2)
+            ],
+            cookTime: 30,
+            dietaryTags: ["vegan", "high-protein", "high-fiber"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Rinse lentils and rice thoroughly.",
+                "In a pot, combine lentils, rice, onion flakes, cumin, bouillon cube, and 2.5 cups water.",
+                "Bring to a boil, then reduce heat to low, cover, and simmer for 35-40 minutes until tender.",
+                "Fluff with a fork and drizzle with olive oil (if using).",
+                "Serve warm as a hearty, fiber-rich meal."
+            ],
+            baseServingSize: 2,
+
+            mealType: "lunch"
+
+        ),
+        Recipe(
+            name: "Black Bean Quesadilla",
+            ingredients: [
+                Ingredient(name: "Whole Wheat Tortilla", amount: 1, unit: "large", carbonFootprint: 0.5, spoilageRisk: 0.1, cost: 0.35),
+                Ingredient(name: "Canned Black Beans", amount: 0.5, unit: "15 oz can", carbonFootprint: 0.6, spoilageRisk: 0.0, cost: 0.50),
+                Ingredient(name: "Shredded Cheese", amount: 0.25, unit: "cup", carbonFootprint: 0.7, spoilageRisk: 0.2, cost: 0.50),
+                Ingredient(name: "Salsa", amount: 2, unit: "tbsp", carbonFootprint: 0.2, spoilageRisk: 0.1, cost: 0.20),
+                Ingredient(name: "Cumin", amount: 0.25, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05)
+            ],
+            cookTime: 10,
+            dietaryTags: ["vegetarian", "high-fiber"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Drain and rinse black beans to reduce sodium",
+                "Mash beans lightly with cumin",
+                "Spread beans on half of tortilla, add cheese and salsa",
+                "Fold tortilla and cook in a skillet on medium heat until cheese melts and tortilla is golden",
+                "Cut and serve warm"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Simple Tofu Stir-Fry",
+            ingredients: [
+                Ingredient(name: "Firm Tofu", amount: 0.5, unit: "block", carbonFootprint: 0.8, spoilageRisk: 0.2, cost: 1.00),
+                Ingredient(name: "Frozen Mixed Vegetables", amount: 1, unit: "cup", carbonFootprint: 0.5, spoilageRisk: 0.0, cost: 0.60),
+                Ingredient(name: "Soy Sauce (low sodium)", amount: 1, unit: "tbsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Garlic Powder", amount: 0.25, unit: "tsp", carbonFootprint: 0.02, spoilageRisk: 0.0, cost: 0.02),
+                Ingredient(name: "Cooked Rice", amount: 1, unit: "cup", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.25)
+            ],
+            cookTime: 15,
+            dietaryTags: ["vegan", "high-protein"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Cut tofu into cubes and pat dry",
+                "In a non-stick pan, add tofu and cook until golden on edges",
+                "Add frozen vegetables and cook until heated",
+                "Add soy sauce and garlic powder, stir well",
+                "Serve over cooked rice"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Veggie Sopa",
+            ingredients: [
+                Ingredient(name: "Pasta (small shells or elbows)", amount: 0.5, unit: "cup", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.20),
+                Ingredient(name: "Canned Mixed Vegetables", amount: 0.5, unit: "15 oz can", carbonFootprint: 0.5, spoilageRisk: 0.0, cost: 0.50),
+                Ingredient(name: "Chicken Bouillon Powder (low sodium)", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Water", amount: 2, unit: "cups", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.00),
+                Ingredient(name: "Lime Juice", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05)
+            ],
+            cookTime: 15,
+            dietaryTags: ["vegetarian", "budget-friendly"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "In a pot, boil water with bouillon powder",
+                "Add pasta and cook 7 minutes",
+                "Add canned mixed vegetables with liquid, cook 5 more minutes",
+                "Turn off heat, add lime juice, and serve"
+            ],
+            baseServingSize: 1,
+            mealType: "lunch"
+        ),
+        Recipe(
+            name: "Easy Peanut Noodles",
+            ingredients: [
+                Ingredient(name: "Spaghetti", amount: 2, unit: "oz", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.15),
+                Ingredient(name: "Peanut Butter", amount: 1, unit: "tbsp", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Soy Sauce (low sodium)", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.02),
+                Ingredient(name: "Frozen Broccoli", amount: 0.5, unit: "cup", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.25),
+                Ingredient(name: "Garlic Powder", amount: 0.25, unit: "tsp", carbonFootprint: 0.02, spoilageRisk: 0.0, cost: 0.02),
+                Ingredient(name: "Water", amount: 1, unit: "tbsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.00)
+            ],
+            cookTime: 10,
+            dietaryTags: ["vegetarian", "budget-friendly"],
+            chronicConditionAvoid: ["nut-allergy"],
+            directions: [
+                "Cook spaghetti according to package directions, adding frozen broccoli during last 3 minutes",
+                "In a bowl, mix peanut butter, soy sauce, garlic powder, and water",
+                "Drain noodles and broccoli, toss with sauce",
+                "Serve warm or cold"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+
+        Recipe(
+            name: "Peanut Butter Oatmeal with Cinnamon",
+            ingredients: [
+                Ingredient(name: "Rolled Oats", amount: 0.5, unit: "cup", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.3),
+                Ingredient(name: "Peanut Butter (no added sugar/salt)", amount: 1, unit: "tbsp", carbonFootprint: 0.6, spoilageRisk: 0.0, cost: 0.2),
+                Ingredient(name: "Ground Cinnamon", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Water or Low-Sodium Plant Milk (if available)", amount: 1, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.2)
+            ],
+            cookTime: 5,
+            dietaryTags: ["vegan", "gluten-free (if certified oats)", "breakfast"],
+            chronicConditionAvoid: ["high-sodium", "high-sugar"],
+            directions: [
+                "Bring water (or milk) to a boil in a small pot.",
+                "Stir in oats and reduce heat to low, cooking for 3-5 minutes until thickened.",
+                "Remove from heat and stir in peanut butter and cinnamon.",
+                "Let sit for 1 minute before serving. Add a splash of water if too thick."
+            ],
+            baseServingSize: 1,
+
+            mealType: "breakfast"
+
+        ),
+           
+               Recipe(
+                 name: "Basic Oatmeal with Berries",
+                 ingredients: [
+                   Ingredient(name: "Oats", amount: 0.5, unit: "cup", carbonFootprint: 0.5, spoilageRisk: 0.05, cost: 0.6),
+                   Ingredient(name: "Blueberries", amount: 0.5, unit: "cup", carbonFootprint: 0.8, spoilageRisk: 0.3, cost: 1.2),
+                   Ingredient(name: "Almond Milk", amount: 1, unit: "cup", carbonFootprint: 0.7, spoilageRisk: 0.2, cost: 1.0),
+                 ],
+                 cookTime: 15,
+                 dietaryTags: ["vegan", "gluten-free", "breakfast"],
+                 chronicConditionAvoid: [],
+                 directions: [
+                   "In a pot, combine oats with almond milk over medium heat.",
+                   "Stir frequently and cook until the oats are creamy (about 10 minutes).",
+                   "Add blueberries and cook for 2-3 more minutes until warm.",
+                   "Serve in a bowl with extra berries and a drizzle of honey or maple syrup if desired."
+                 ],
+                 baseServingSize: 1,
+                 mealType: "breakfast"
+
+               ),
+        Recipe(
+            name: "No-Salt-Added Tuna Salad Lettuce Wraps",
+            ingredients: [
+                Ingredient(name: "Canned Tuna in Water", amount: 1, unit: "5 oz can", carbonFootprint: 2.0, spoilageRisk: 0.0, cost: 1.50),
+                Ingredient(name: "Dried Celery Flakes", amount: 2, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.15),
+                Ingredient(name: "Powdered Greek Yogurt", amount: 2, unit: "tbsp", carbonFootprint: 0.8, spoilageRisk: 0.0, cost: 0.30),
+                Ingredient(name: "Lemon Juice (bottled)", amount: 1, unit: "tbsp", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Dried Dill", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Whole Grain Crackers", amount: 6, unit: "crackers", carbonFootprint: 0.5, spoilageRisk: 0.0, cost: 0.30)
+            ],
+            cookTime: 5,
+            dietaryTags: ["high-protein", "low-carb"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Reconstitute yogurt with 1 tbsp water",
+                "Drain tuna, mix with celery flakes, yogurt, lemon juice, and dill",
+                "Serve with crackers or wrapped in lettuce leaves (if available)"
+            ],
+            baseServingSize: 1,
+
+            mealType: "lunch"
+
+        ),
+        Recipe(
+            name: "Smoked Salmon & Whole Grain Salad",
+            ingredients: [
+                Ingredient(name: "Canned Smoked Salmon", amount: 1, unit: "3 oz can", carbonFootprint: 2.2, spoilageRisk: 0.0, cost: 2.50),
+                Ingredient(name: "Whole Grain Couscous", amount: 0.5, unit: "cup dry", carbonFootprint: 0.6, spoilageRisk: 0.0, cost: 0.40),
+                Ingredient(name: "Dried Dill", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Dried Lemon Peel", amount: 0.5, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Powdered Olive Oil", amount: 1, unit: "tsp", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.20)
+            ],
+            cookTime: 10,
+            dietaryTags: ["omega-3", "heart-healthy"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Cook couscous with 1 cup boiling water, let stand 5 mins",
+                "Flake salmon, mix with couscous",
+                "Reconstitute olive oil with 1 tsp water",
+                "Toss all ingredients together"
+            ],
+            baseServingSize: 1,
+
+            mealType: "dinner"
+
+        ),
+               Recipe(
+                 name: "Avocado Toast",
+                 ingredients: [
+                   Ingredient(name: "Whole Grain Bread", amount: 2, unit: "slices", carbonFootprint: 0.4, spoilageRisk: 0.4, cost: 0.8),
+                   Ingredient(name: "Avocado", amount: 0.5, unit: "medium", carbonFootprint: 1.5, spoilageRisk: 0.35, cost: 1.5),
+                   Ingredient(name: "Lemon Juice", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.05, cost: 0.2),
+                 ],
+                 cookTime: 10,
+                 dietaryTags: ["vegan", "breakfast"],
+                 chronicConditionAvoid: [],
+                 directions: [
+                   "Toast slices of whole grain bread to desired crispness.",
+                   "Mash avocado in a bowl with lemon juice, salt, and pepper.",
+                   "Spread mashed avocado over toasted bread.",
+                   "Optional: sprinkle with chili flakes, sesame seeds, or sliced tomatoes."
+                 ],
+                 baseServingSize: 1,
+
+                 mealType: "breakfast"
+
+               ),
+               
+               
+               Recipe(
+                 name: "Greek Yogurt with Honey & Nuts",
+                 ingredients: [
+                   Ingredient(name: "Greek Yogurt", amount: 1, unit: "cup", carbonFootprint: 2.0, spoilageRisk: 0.3, cost: 1.0),
+                   Ingredient(name: "Honey", amount: 1, unit: "tbsp", carbonFootprint: 0.4, spoilageRisk: 0.05, cost: 0.5),
+                   Ingredient(name: "Walnuts", amount: 2, unit: "tbsp", carbonFootprint: 0.7, spoilageRisk: 0.15, cost: 1.0),
+                 ],
+                 cookTime: 5,
+                 dietaryTags: ["gluten-free", "breakfast"],
+                 chronicConditionAvoid: ["vegan"],
+                 directions: [
+                   "Scoop Greek yogurt into a bowl.",
+                   "Drizzle honey over the yogurt.",
+                   "Top with chopped walnuts.",
+                   "Optional: add berries or sliced fruit for extra nutrition."
+                 ],
+                 baseServingSize: 1,
+
+                 mealType: "breakfast"
+
+               ),
+        Recipe(
+            name: "Breakfast Chilaquiles with Canned Tomatoes",
+            ingredients: [
+                Ingredient(name: "Corn Tortilla Chips", amount: 2, unit: "cups", carbonFootprint: 0.8, spoilageRisk: 0.0, cost: 0.6),
+                Ingredient(name: "Canned Diced Tomatoes (no salt added)", amount: 1, unit: "14.5 oz can", carbonFootprint: 1.0, spoilageRisk: 0.0, cost: 1.0),
+                Ingredient(name: "Canned Green Chiles", amount: 0.25, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.3),
+                Ingredient(name: "Eggs", amount: 2, unit: "large", carbonFootprint: 3.0, spoilageRisk: 0.3, cost: 0.4),
+                Ingredient(name: "Garlic Powder", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Cumin", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.1)
+            ],
+            cookTime: 15,
+            dietaryTags: ["vegetarian", "high-protein", "breakfast"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Blend canned tomatoes, green chiles, garlic powder, and cumin into a sauce.",
+                "Simmer sauce in a pan for 5 minutes until slightly thickened.",
+                "Add tortilla chips, tossing gently to coat (they should soften slightly).",
+                "Push chips to the side, fry eggs in the same pan to desired doneness.",
+                "Serve eggs over saucy chips. Optional: Top with canned black beans (rinsed)."
+            ],
+            baseServingSize: 1,
+
+            mealType: "breakfast"
+
+        ),
+        
+       
+        Recipe(
+            name: "Tuna and White Bean Salad",
+            ingredients: [
+                Ingredient(name: "Canned Tuna in Water", amount: 1, unit: "5 oz can", carbonFootprint: 2.0, spoilageRisk: 0.0, cost: 1.5),
+                Ingredient(name: "Canned White Beans", amount: 1, unit: "15 oz can", carbonFootprint: 1.2, spoilageRisk: 0.0, cost: 1.0),
+                Ingredient(name: "Dried Parsley", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Lemon Juice (bottled)", amount: 1, unit: "tbsp", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.2),
+                Ingredient(name: "Black Pepper", amount: 0.25, unit: "tsp", carbonFootprint: 0.02, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Olive Oil (optional)", amount: 1, unit: "tsp", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.2)
+            ],
+            cookTime: 5,
+            dietaryTags: ["high-protein", "gluten-free"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Drain and rinse white beans to reduce sodium.",
+                "Drain tuna and flake into a bowl.",
+                "Add beans, parsley, lemon juice, black pepper, and olive oil (if using).",
+                "Mix gently and serve on whole-grain bread or as a salad."
+            ],
+            baseServingSize: 2,
+
+            mealType: "lunch"
+
+        ),
+               Recipe(
+                   name: "Quinoa Bowl",
+                   ingredients: [
+                       Ingredient(name: "Quinoa", amount: 1.0, unit: "cups", carbonFootprint: 4.08, spoilageRisk: 0.1, cost: 1.5),
+                       Ingredient(name: "Black Beans", amount: 0.75, unit: "cups", carbonFootprint: 0.88, spoilageRisk: 0.2, cost: 0.8),
+                       Ingredient(name: "Avocado", amount: 1.0, unit: "pieces", carbonFootprint: 1.98, spoilageRisk: 0.7, cost: 1.2),
+                       Ingredient(name: "Corn", amount: 0.5, unit: "cups", carbonFootprint: 1.32, spoilageRisk: 0.3, cost: 0.6),
+                       Ingredient(name: "Lime", amount: 1.0, unit: "pieces", carbonFootprint: 0.88, spoilageRisk: 0.3, cost: 0.2),
+                       Ingredient(name: "Fresh Cilantro", amount: 0.25, unit: "cups", carbonFootprint: 0.22, spoilageRisk: 0.8, cost: 0.3)
+                   ],
+                   cookTime: 25,
+                   dietaryTags: ["vegan", "gluten-free", "lunch", "dinner"],
+                   chronicConditionAvoid: [],
+                   directions: [
+                       "Rinse quinoa under cold water and cook according to package instructions (about 15 minutes).",
+                       "Drain and rinse black beans if using canned.",
+                       "Dice avocado and squeeze lime juice over it to prevent browning.",
+                       "Combine cooked quinoa, black beans, corn, and diced avocado in a large bowl.",
+                       "Add chopped cilantro and remaining lime juice.",
+                       "Season with salt and pepper to taste.",
+                       "Serve warm or chilled."
+                   ],
+                   baseServingSize: 1,
+
+                   mealType: "lunch"
+
+               ),
+        Recipe(
+            name: "Chickpea Curry Rice Bowl",
+            ingredients: [
+                Ingredient(name: "Canned Chickpeas", amount: 0.5, unit: "15 oz can", carbonFootprint: 0.6, spoilageRisk: 0.0, cost: 0.50),
+                Ingredient(name: "Canned Diced Tomatoes", amount: 0.5, unit: "14.5 oz can", carbonFootprint: 0.5, spoilageRisk: 0.0, cost: 0.60),
+                Ingredient(name: "Curry Powder", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Frozen Spinach", amount: 0.5, unit: "cup", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.30),
+                Ingredient(name: "Cooked Rice", amount: 1, unit: "cup", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.25)
+            ],
+            cookTime: 15,
+            dietaryTags: ["vegan", "high-fiber", "diabetes-friendly"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Drain and rinse chickpeas",
+                "In a pot, add chickpeas, tomatoes, curry powder, and frozen spinach",
+                "Simmer for 10 minutes until flavors combine",
+                "Serve over cooked rice"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Greek Inspired Bean Salad",
+            ingredients: [
+                Ingredient(name: "Canned White Beans", amount: 0.5, unit: "15 oz can", carbonFootprint: 0.6, spoilageRisk: 0.0, cost: 0.50),
+                Ingredient(name: "Cherry Tomatoes", amount: 0.5, unit: "cup", carbonFootprint: 0.3, spoilageRisk: 0.2, cost: 0.50),
+                Ingredient(name: "Cucumber", amount: 0.25, unit: "medium", carbonFootprint: 0.1, spoilageRisk: 0.2, cost: 0.20),
+                Ingredient(name: "Olive Oil", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Lemon Juice", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Dried Oregano", amount: 0.25, unit: "tsp", carbonFootprint: 0.02, spoilageRisk: 0.0, cost: 0.02)
+            ],
+            cookTime: 5,
+            dietaryTags: ["vegan", "no-cook", "fiber-rich"],
+            chronicConditionAvoid: [],
+            directions: [
+                "Drain and rinse white beans",
+                "Slice cherry tomatoes and cucumber",
+                "In a bowl, combine beans, tomatoes, and cucumber",
+                "Add olive oil, lemon juice, and oregano, mix well",
+                "Serve immediately or chill for later"
+            ],
+            baseServingSize: 1,
+            mealType: "lunch"
+        ),
+        
+        Recipe(
+            name: "Budget Veggie Mac and Cheese",
+            ingredients: [
+                Ingredient(name: "Elbow Pasta", amount: 1, unit: "cup dry", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.30),
+                Ingredient(name: "Frozen Mixed Vegetables", amount: 0.5, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.25),
+                Ingredient(name: "Shredded Cheddar Cheese", amount: 0.33, unit: "cup", carbonFootprint: 1.2, spoilageRisk: 0.2, cost: 0.75),
+                Ingredient(name: "Milk", amount: 0.25, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.2, cost: 0.20),
+                Ingredient(name: "Butter", amount: 1, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.05)
+            ],
+            cookTime: 15,
+            dietaryTags: ["comfort-food", "budget-friendly"],
+            chronicConditionAvoid: ["high-fat"],
+            directions: [
+                "Cook pasta according to package directions",
+                "Add frozen vegetables to pasta water in last 4 minutes of cooking",
+                "Drain and return to pot",
+                "Add butter, milk, and cheese, stir until melted",
+                "Serve warm"
+            ],
+            baseServingSize: 1,
+            mealType: "lunch"
+        ),
+        Recipe(
+            name: "American Tuna Salad Wrap",
+            ingredients: [
+                Ingredient(name: "Canned Tuna in Water", amount: 1, unit: "5 oz can", carbonFootprint: 1.1, spoilageRisk: 0.0, cost: 0.95),
+                Ingredient(name: "Whole Wheat Tortilla", amount: 1, unit: "large", carbonFootprint: 0.3, spoilageRisk: 0.2, cost: 0.40),
+                Ingredient(name: "Celery", amount: 0.25, unit: "cup diced", carbonFootprint: 0.05, spoilageRisk: 0.2, cost: 0.10),
+                Ingredient(name: "Plain Greek Yogurt", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.2, cost: 0.10),
+                Ingredient(name: "Mustard", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Black Pepper", amount: 0.125, unit: "tsp", carbonFootprint: 0.0, spoilageRisk: 0.0, cost: 0.02)
+            ],
+            cookTime: 5,
+            dietaryTags: ["high-protein", "omega-3"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Drain tuna and place in a bowl",
+                "Add diced celery, Greek yogurt, mustard, and pepper, mix well",
+                "Place mixture in tortilla, wrap, and serve"
+            ],
+            baseServingSize: 1,
+            mealType: "lunch"
+        ),
+        Recipe(
+            name: "Chicken Tinga Tacos",
+            ingredients: [
+                Ingredient(name: "Canned Chicken", amount: 1, unit: "10 oz can", carbonFootprint: 2.2, spoilageRisk: 0.0, cost: 2.50),
+                Ingredient(name: "Chipotle in Adobo Sauce", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.15),
+                Ingredient(name: "Canned Diced Tomatoes", amount: 0.5, unit: "cup", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.40),
+                Ingredient(name: "Onion", amount: 0.25, unit: "medium", carbonFootprint: 0.05, spoilageRisk: 0.2, cost: 0.10),
+                Ingredient(name: "Corn Tortillas", amount: 3, unit: "small", carbonFootprint: 0.3, spoilageRisk: 0.2, cost: 0.30)
+            ],
+            cookTime: 15,
+            dietaryTags: ["high-protein", "budget-friendly"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Dice onion and sauté until translucent",
+                "Add canned chicken, tomatoes, and chipotle, mash lightly to shred",
+                "Simmer 5 minutes until thickened",
+                "Warm tortillas in a pan",
+                "Serve chicken tinga in tortillas"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Lentil Dal with Rice",
+            ingredients: [
+                Ingredient(name: "Red Lentils", amount: 0.5, unit: "cup dry", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.25),
+                Ingredient(name: "Rice", amount: 0.5, unit: "cup dry", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.20),
+                Ingredient(name: "Garlic", amount: 1, unit: "clove", carbonFootprint: 0.02, spoilageRisk: 0.2, cost: 0.05),
+                Ingredient(name: "Turmeric", amount: 0.25, unit: "tsp", carbonFootprint: 0.01, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Cumin", amount: 0.25, unit: "tsp", carbonFootprint: 0.01, spoilageRisk: 0.0, cost: 0.05)
+            ],
+            cookTime: 20,
+            dietaryTags: ["high-protein", "high-fiber", "vegan"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Rinse lentils, add 1.5 cups water, and cook until soft (~15 min)",
+                "Cook rice according to package instructions",
+                "Add minced garlic, turmeric, and cumin to lentils and simmer 5 minutes",
+                "Serve dal over rice"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Egg Fried Rice",
+            ingredients: [
+                Ingredient(name: "Eggs", amount: 2, unit: "large", carbonFootprint: 0.8, spoilageRisk: 0.5, cost: 0.40),
+                Ingredient(name: "Cooked Rice", amount: 0.75, unit: "cup", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.25),
+                Ingredient(name: "Frozen Mixed Vegetables", amount: 0.5, unit: "cup", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.20),
+                Ingredient(name: "Soy Sauce (low sodium)", amount: 1, unit: "tbsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Oil", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05)
+            ],
+            cookTime: 10,
+            dietaryTags: ["high-protein", "budget-friendly"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Heat oil in a pan, scramble eggs until cooked",
+                "Add frozen vegetables and cook until tender",
+                "Add cooked rice and soy sauce, stir-fry 3-4 minutes",
+                "Mix well and serve hot"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Peanut Tofu Stir-Fry",
+            ingredients: [
+                Ingredient(name: "Firm Tofu", amount: 4, unit: "oz", carbonFootprint: 0.6, spoilageRisk: 0.5, cost: 0.70),
+                Ingredient(name: "Frozen Stir-Fry Vegetables", amount: 1, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.50),
+                Ingredient(name: "Peanut Butter", amount: 1, unit: "tbsp", carbonFootprint: 0.15, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Soy Sauce (low sodium)", amount: 1, unit: "tbsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Cooked Rice", amount: 0.5, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.20)
+            ],
+            cookTime: 15,
+            dietaryTags: ["high-protein", "vegan"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Cube tofu and pat dry",
+                "Pan-fry tofu until lightly browned",
+                "Add frozen vegetables and cook until heated through",
+                "Mix peanut butter and soy sauce with 1 tbsp water and add to the pan",
+                "Stir until combined and heated, serve over rice"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+        Recipe(
+            name: "Turkey Taco Bowl",
+            ingredients: [
+                Ingredient(name: "Ground Turkey", amount: 4, unit: "oz", carbonFootprint: 1.8, spoilageRisk: 0.4, cost: 1.20),
+                Ingredient(name: "Brown Rice", amount: 0.5, unit: "cup cooked", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.20),
+                Ingredient(name: "Frozen Corn", amount: 0.25, unit: "cup", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Salsa", amount: 2, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.1, cost: 0.15),
+                Ingredient(name: "Shredded Lettuce", amount: 0.5, unit: "cup", carbonFootprint: 0.05, spoilageRisk: 0.3, cost: 0.20)
+            ],
+            cookTime: 15,
+            dietaryTags: ["high-protein", "gluten-free", "low-fat"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Brown ground turkey in a skillet until fully cooked",
+                "Heat corn in microwave or pan",
+                "In a bowl, layer rice, turkey, corn, lettuce, and salsa",
+                "Optional: add lime juice or chili powder for extra flavor"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+
+
+        Recipe(
+            name: "Chicken Veggie Stir-Fry",
+            ingredients: [
+                Ingredient(name: "Chicken Breast", amount: 4, unit: "oz", carbonFootprint: 1.8, spoilageRisk: 0.5, cost: 1.20),
+                Ingredient(name: "Frozen Stir-Fry Vegetables", amount: 1, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.50),
+                Ingredient(name: "Soy Sauce (low sodium)", amount: 1, unit: "tbsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Oil", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Cooked Rice", amount: 0.5, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.20)
+            ],
+            cookTime: 15,
+            dietaryTags: ["high-protein", "gluten-free", "budget-friendly"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Cut chicken into bite-sized pieces",
+                "Heat oil in pan, cook chicken until browned",
+                "Add frozen vegetables and soy sauce",
+                "Stir-fry until vegetables are heated and chicken is cooked through",
+                "Serve over cooked rice"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+
+
+        Recipe(
+            name: "Pantry Turkey Chili",
+            ingredients: [
+                Ingredient(name: "Canned Ground Turkey", amount: 1, unit: "12 oz can", carbonFootprint: 2.8, spoilageRisk: 0.0, cost: 3.50),
+                Ingredient(name: "Canned Kidney Beans", amount: 1, unit: "15 oz can", carbonFootprint: 1.2, spoilageRisk: 0.0, cost: 1.00),
+                Ingredient(name: "Canned Diced Tomatoes (no salt added)", amount: 1, unit: "14.5 oz can", carbonFootprint: 1.0, spoilageRisk: 0.0, cost: 1.20),
+                Ingredient(name: "Chili Powder", amount: 1, unit: "tbsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Dried Onion Flakes", amount: 2, unit: "tbsp", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.15)
+            ],
+            cookTime: 20,
+            dietaryTags: ["high-protein", "diabetes-friendly"],
+            chronicConditionAvoid: ["high-sodium", "high-fat"],
+            directions: [
+                "Drain and rinse beans to reduce sodium by 40%",
+                "Brown canned turkey in pot with onion flakes",
+                "Add tomatoes, beans, chili powder, and 1/2 cup water",
+                "Simmer 20 mins, stirring occasionally"
+            ],
+            baseServingSize: 3,
+
+            mealType: "dinner"
+
+        ),
+        Recipe(
+            name: "Chipotle Black Bean Tostadas",
+            ingredients: [
+                Ingredient(name: "Canned Black Beans", amount: 1, unit: "15 oz can", carbonFootprint: 1.2, spoilageRisk: 0.0, cost: 0.99),
+                Ingredient(name: "Corn Tostada Shells", amount: 4, unit: "shells", carbonFootprint: 0.8, spoilageRisk: 0.0, cost: 0.60),
+                Ingredient(name: "Chipotle in Adobo (canned)", amount: 1, unit: "pepper", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.25),
+                Ingredient(name: "Dried Oregano", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.03),
+                Ingredient(name: "Lime Juice (bottled)", amount: 1, unit: "tbsp", carbonFootprint: 0.2, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Garlic Powder", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.03)
+            ],
+            cookTime: 10,
+            dietaryTags: ["vegan", "gluten-free", "diabetes-friendly"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Drain and rinse black beans, then mash with chipotle pepper, oregano, garlic powder, and lime juice",
+                "Toast tostada shells in dry pan for 30 seconds per side",
+                "Spread bean mixture on shells",
+                "Optional: Top with reconstituted powdered salsa or pickled jalapeños"
+            ],
+            baseServingSize: 2,
+
+            mealType: "dinner"
+
+        ),
+        Recipe(
+            name: "Horchata Overnight Oats",
+            ingredients: [
+                Ingredient(name: "Rolled Oats", amount: 0.5, unit: "cup", carbonFootprint: 0.4, spoilageRisk: 0.0, cost: 0.15),
+                Ingredient(name: "Rice Powder", amount: 2, unit: "tbsp", carbonFootprint: 0.3, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Cinnamon", amount: 1, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.03),
+                Ingredient(name: "Almond Extract", amount: 0.25, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.10),
+                Ingredient(name: "Powdered Milk", amount: 2, unit: "tbsp", carbonFootprint: 0.8, spoilageRisk: 0.0, cost: 0.20)
+            ],
+            cookTime: 5,
+            dietaryTags: ["vegetarian", "diabetes-friendly", "make-ahead"],
+            chronicConditionAvoid: ["high-sugar"],
+            directions: [
+                "Combine all ingredients with 1 cup water",
+                "Stir well and refrigerate overnight",
+                "In morning, add more water if too thick",
+                "Top with crushed almonds if available"
+            ],
+            baseServingSize: 1,
+
+            mealType: "breakfast"
+
+        ),
+
+              
+               Recipe(
+                   name: "Spinach and Mushroom Omelette",
+                   ingredients: [
+                       Ingredient(name: "Eggs", amount: 3, unit: "large", carbonFootprint: 4.5, spoilageRisk: 0.3, cost: 1.0),
+                       Ingredient(name: "Spinach", amount: 1.0, unit: "cup", carbonFootprint: 0.2, spoilageRisk: 0.2, cost: 0.5),
+                       Ingredient(name: "Mushrooms", amount: 0.5, unit: "cup", carbonFootprint: 0.3, spoilageRisk: 0.3, cost: 0.7)
+                   ],
+                   cookTime: 15,
+                   dietaryTags: ["gluten-free", "breakfast"],
+                   chronicConditionAvoid: [],
+                   directions: [
+                       "Crack eggs into a bowl, whisk with salt and pepper.",
+                       "Heat a nonstick pan over medium heat and add sliced mushrooms.",
+                       "Cook mushrooms until soft, then add spinach and cook until wilted.",
+                       "Pour eggs over the vegetables and cook until set, folding gently if desired.",
+                       "Serve warm."
+                   ],
+                   baseServingSize: 1,
+
+                   mealType: "breakfast"
+
+               ),
+        Recipe(
+            name: "Canned Chickpea and Tomato Stew",
+            ingredients: [
+                Ingredient(name: "Canned Chickpeas", amount: 1, unit: "15 oz can", carbonFootprint: 1.2, spoilageRisk: 0.0, cost: 1.3),
+                Ingredient(name: "Canned Diced Tomatoes", amount: 1, unit: "14.5 oz can", carbonFootprint: 1.0, spoilageRisk: 0.0, cost: 1.0),
+                Ingredient(name: "Onion Powder", amount: 1, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Garlic Powder", amount: 1, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Dried Oregano", amount: 0.5, unit: "tsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.1),
+                Ingredient(name: "Low-Sodium Vegetable Broth (or water)", amount: 1, unit: "cup", carbonFootprint: 0.5, spoilageRisk: 0.0, cost: 0.3)
+            ],
+            cookTime: 20,
+            dietaryTags: ["vegan", "gluten-free", "high-fiber"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Drain and rinse chickpeas to reduce sodium.",
+                "In a pot, combine chickpeas, diced tomatoes (with liquid), onion powder, garlic powder, oregano, and broth.",
+                "Bring to a simmer over medium heat and cook for 15-20 minutes, stirring occasionally.",
+                "Adjust seasoning with black pepper (no added salt for hypertension-friendly version).",
+                "Serve warm"
+                ],
+            baseServingSize: 2,
+
+            mealType: "dinner"
+
+        ),
+               
+               Recipe(
+                   name: "Chia Seed Pudding",
+                   ingredients: [
+                       Ingredient(name: "Chia Seeds", amount: 3, unit: "tablespoons", carbonFootprint: 0.6, spoilageRisk: 0.05, cost: 0.8),
+                       Ingredient(name: "Coconut Milk", amount: 1.0, unit: "cup", carbonFootprint: 1.0, spoilageRisk: 0.1, cost: 1.2),
+                       Ingredient(name: "Maple Syrup", amount: 1, unit: "tablespoon", carbonFootprint: 0.4, spoilageRisk: 0.02, cost: 0.4)
+                   ],
+                   cookTime: 5,
+                   dietaryTags: ["vegan", "gluten-free", "breakfast"],
+                   chronicConditionAvoid: [],
+                   directions: [
+                       "In a jar, combine chia seeds, coconut milk, and maple syrup.",
+                       "Stir well to prevent clumping.",
+                       "Refrigerate for at least 4 hours or overnight until pudding consistency.",
+                       "Top with fruit or nuts before serving if desired."
+                   ],
+                   baseServingSize: 1,
+
+                   mealType: "breakfast"
+
+               ),
+        Recipe(
+            name: "Ground Turkey Lettuce Wraps",
+            ingredients: [
+                Ingredient(name: "Ground Turkey", amount: 4, unit: "oz", carbonFootprint: 1.8, spoilageRisk: 0.4, cost: 1.20),
+                Ingredient(name: "Carrot", amount: 0.5, unit: "medium", carbonFootprint: 0.05, spoilageRisk: 0.2, cost: 0.08),
+                Ingredient(name: "Green Onion", amount: 1, unit: "stalk", carbonFootprint: 0.05, spoilageRisk: 0.2, cost: 0.05),
+                Ingredient(name: "Soy Sauce (low sodium)", amount: 1, unit: "tbsp", carbonFootprint: 0.05, spoilageRisk: 0.0, cost: 0.05),
+                Ingredient(name: "Romaine Lettuce", amount: 3, unit: "large leaves", carbonFootprint: 0.1, spoilageRisk: 0.2, cost: 0.40)
+            ],
+            cookTime: 10,
+            dietaryTags: ["high-protein", "gluten-free"],
+            chronicConditionAvoid: ["high-sodium"],
+            directions: [
+                "Finely chop carrot and green onion",
+                "Cook ground turkey in a pan until browned",
+                "Add carrot, green onion, and soy sauce, cook 2 minutes",
+                "Spoon turkey mixture into lettuce leaves and serve"
+            ],
+            baseServingSize: 1,
+            mealType: "dinner"
+        ),
+               
+               
+               Recipe(
+                   name: "Banana Oat Pancakes",
+                   ingredients: [
+                       Ingredient(name: "Rolled Oats", amount: 1.0, unit: "cups", carbonFootprint: 1.2, spoilageRisk: 0.1, cost: 0.8),
+                       Ingredient(name: "Ripe Bananas", amount: 2.0, unit: "pieces", carbonFootprint: 0.5, spoilageRisk: 0.6, cost: 0.6),
+                       Ingredient(name: "Eggs", amount: 2.0, unit: "pieces", carbonFootprint: 4.2, spoilageRisk: 0.3, cost: 0.5),
+                       Ingredient(name: "Milk", amount: 0.5, unit: "cups", carbonFootprint: 3.8, spoilageRisk: 0.4, cost: 0.4),
+                       Ingredient(name: "Vanilla Extract", amount: 1.0, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.1, cost: 0.2),
+                       Ingredient(name: "Cinnamon", amount: 0.5, unit: "tsp", carbonFootprint: 0.1, spoilageRisk: 0.1, cost: 0.1)
+                   ],
+                   cookTime: 15,
+                   dietaryTags: ["vegetarian", "breakfast"],
+                   chronicConditionAvoid: ["vegan"],
+                   directions: [
+                       "Blend oats in a blender until they form a fine flour.",
+                       "Add bananas, eggs, milk, vanilla, and cinnamon to the blender.",
+                       "Blend until smooth batter forms.",
+                       "Heat a non-stick pan over medium heat.",
+                       "Pour 1/4 cup batter per pancake into the pan.",
+                       "Cook for 2-3 minutes until bubbles form, then flip.",
+                       "Cook for another 2 minutes until golden brown.",
+                       "Serve warm with your favorite toppings."
+                   ],
+                   baseServingSize: 2,
+
+                   mealType: "breakfast"
+
+               ),
+        
+        Recipe(
+            name: "Quinoa Buddha Bowl",
+            ingredients: [
+                Ingredient(name: "Quinoa", amount: 1.0, unit: "cup", carbonFootprint: 1.8, spoilageRisk: 0.1, cost: 1.2),
+                Ingredient(name: "Sweet Potato", amount: 1.0, unit: "medium", carbonFootprint: 0.3, spoilageRisk: 0.2, cost: 0.8),
+                Ingredient(name: "Chickpeas", amount: 1.0, unit: "can", carbonFootprint: 0.9, spoilageRisk: 0.1, cost: 0.9),
+                Ingredient(name: "Spinach", amount: 2.0, unit: "cups", carbonFootprint: 0.2, spoilageRisk: 0.7, cost: 0.5),
+                Ingredient(name: "Avocado", amount: 0.5, unit: "piece", carbonFootprint: 0.4, spoilageRisk: 0.8, cost: 0.7),
+                Ingredient(name: "Tahini", amount: 2.0, unit: "tbsp", carbonFootprint: 0.3, spoilageRisk: 0.1, cost: 0.6),
+                Ingredient(name: "Lemon", amount: 0.5, unit: "piece", carbonFootprint: 0.1, spoilageRisk: 0.3, cost: 0.3)
+            ],
+            cookTime: 20,
+            dietaryTags: ["vegan", "lunch", "dinner"],
+            chronicConditionAvoid: [],
+            directions: [
+                "Cook quinoa according to package directions.",
+                "Cube sweet potato and roast at 400°F for 25 minutes.",
+                "Drain and rinse chickpeas.",
+                "Wash and dry spinach leaves.",
+                "Slice avocado just before serving.",
+                "Whisk tahini with lemon juice and water to make dressing.",
+                "Assemble bowl with quinoa as base, top with vegetables.",
+                "Drizzle with tahini dressing and serve."
+            ],
+            baseServingSize: 2,
+
+            mealType: "breakfast"
+
+        )
+    ]
+}
+
+class MealPlanPDFGenerator: ObservableObject {
+    func generatePDF(for weeklyPlan: [[Recipe]], weeklyBudget: String, environmentalImpact: Double, totalCost: Double, optimizationStats: (reuseRate: Double, mostUsedIngredients: [(name: String, count: Int)])) -> PDFDocument? {
+        
+        let pdfMetaData = [
+            kCGPDFContextCreator: "NutriAid Meal Planner",
+            kCGPDFContextAuthor: "NutriAid App",
+            kCGPDFContextTitle: "Weekly Meal Plan"
+        ]
+        
+        let format = UIGraphicsPDFRendererFormat()
+        format.documentInfo = pdfMetaData as [String: Any]
+        
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792) // Standard US Letter
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect, format: format)
+        
+        let data = renderer.pdfData { context in
+            context.beginPage()
+            
+            var yPosition: CGFloat = 50
+            
+            // Title
+            let titleFont = UIFont.boldSystemFont(ofSize: 24)
+            let titleAttributes: [NSAttributedString.Key: Any] = [
+                .font: titleFont,
+                .foregroundColor: UIColor.black
+            ]
+            let titleText = "🍽️ Weekly Meal Plan"
+            titleText.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttributes)
+            yPosition += 40
+            
+            // Summary section
+            let summaryFont = UIFont.systemFont(ofSize: 14)
+            let summaryAttributes: [NSAttributedString.Key: Any] = [
+                .font: summaryFont,
+                .foregroundColor: UIColor.darkGray
+            ]
+            
+            let summaryText = """
+            Weekly Budget: $\(weeklyBudget)
+            Total Cost: $\(String(format: "%.2f", totalCost))
+            Environmental Impact: \(environmentalImpact > 40 ? "High" : environmentalImpact >= 20 ? "Medium" : "Low")
+            Ingredient Reuse Rate: \(String(format: "%.1f%%", optimizationStats.reuseRate * 100))
+            Waste Reduction: \(String(format: "%.1f lbs", weeklyPlan.flatMap { $0 }.reduce(0) { $0 + $1.totalWasteReduction }))
+            """
+            
+            summaryText.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: summaryAttributes)
+            yPosition += 80
+            
+            // Daily meal plans
+            let dayFont = UIFont.boldSystemFont(ofSize: 16)
+            let dayAttributes: [NSAttributedString.Key: Any] = [
+                .font: dayFont,
+                .foregroundColor: UIColor.black
+            ]
+            
+            let recipeFont = UIFont.systemFont(ofSize: 12)
+            let recipeAttributes: [NSAttributedString.Key: Any] = [
+                .font: recipeFont,
+                .foregroundColor: UIColor.black
+            ]
+            
+            let ingredientFont = UIFont.systemFont(ofSize: 10)
+            let ingredientAttributes: [NSAttributedString.Key: Any] = [
+                .font: ingredientFont,
+                .foregroundColor: UIColor.gray
+            ]
+            
+            for (dayIndex, dayMeals) in weeklyPlan.enumerated() {
+                if yPosition > 700 { // Start new page if needed
+                    context.beginPage()
+                    yPosition = 50
+                }
+                
+                let dayText = "Day \(dayIndex + 1)"
+                dayText.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: dayAttributes)
+                yPosition += 25
+                
+                let mealTypes = ["Breakfast", "Lunch", "Dinner"]
+                
+                for (mealIndex, recipe) in dayMeals.enumerated() {
+                    if mealIndex < mealTypes.count {
+                        let mealTypeText = "\(mealTypes[mealIndex]): \(recipe.dietaryEmoji) \(recipe.name)"
+                        mealTypeText.draw(at: CGPoint(x: 70, y: yPosition), withAttributes: recipeAttributes)
+                        yPosition += 15
+                        
+                        let recipeDetails = "Cook Time: \(recipe.cookTime) mins • Cost: $\(String(format: "%.2f", recipe.totalCost)) • Waste Reduction: \(String(format: "%.1f lbs", recipe.totalWasteReduction))"
+                        recipeDetails.draw(at: CGPoint(x: 90, y: yPosition), withAttributes: ingredientAttributes)
+                        yPosition += 12
+                        
+                        let ingredients = recipe.ingredients.map { $0.name }.joined(separator: ", ")
+                        let ingredientsText = "Ingredients: \(ingredients)"
+                        
+                        // Handle long ingredient lists
+                        let maxWidth: CGFloat = 450
+                        let boundingRect = ingredientsText.boundingRect(
+                            with: CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude),
+                            options: .usesLineFragmentOrigin,
+                            attributes: ingredientAttributes,
+                            context: nil
+                        )
+                        
+                        ingredientsText.draw(
+                            in: CGRect(x: 90, y: yPosition, width: maxWidth, height: boundingRect.height),
+                            withAttributes: ingredientAttributes
+                        )
+                        yPosition += boundingRect.height + 10
+                    }
+                }
+                yPosition += 15
+            }
+            
+            // Most used ingredients section
+            if !optimizationStats.mostUsedIngredients.isEmpty {
+                if yPosition > 650 {
+                    context.beginPage()
+                    yPosition = 50
+                }
+                
+                "Most Used Ingredients:".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: dayAttributes)
+                yPosition += 25
+                
+                for ingredient in optimizationStats.mostUsedIngredients {
+                    let ingredientText = "• \(ingredient.name) (used \(ingredient.count) times)"
+                    ingredientText.draw(at: CGPoint(x: 70, y: yPosition), withAttributes: recipeAttributes)
+                    yPosition += 15
+                }
+            }
+        }
+        
+        return PDFDocument(data: data)
+    }
+}
+
+struct PDFKitView: UIViewRepresentable {
+    let pdfDocument: PDFDocument
+    
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.document = pdfDocument
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        return pdfView
+    }
+    
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        uiView.document = pdfDocument
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    var onComplete: ((Bool) -> Void)? = nil
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        
+        // Set completion handler to know when user has finished
+        controller.completionWithItemsHandler = { activityType, completed, returnedItems, error in
+            onComplete?(completed)
+        }
+        
+        // Exclude some activities that might not make sense for PDFs
+        controller.excludedActivityTypes = [
+            .assignToContact,
+            .addToReadingList,
+            .postToVimeo,
+            .postToWeibo,
+            .postToFlickr,
+            .postToTencentWeibo
+        ]
+        
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+struct PDFExportView: View {
+    let weeklyPlan: [[Recipe]]
+    let weeklyBudget: String
+    let environmentalImpact: Double
+    let totalCost: Double
+    let optimizationStats: (reuseRate: Double, mostUsedIngredients: [(name: String, count: Int)])
+    let pdfGenerator: MealPlanPDFGenerator
+    @Binding var isPresented: Bool
+    
+    @State private var pdfDocument: PDFDocument?
+    @State private var isGeneratingPDF = false
+    @State private var showShareSheet = false
+    @State private var pdfURL: URL?
+    @State private var showAlert = false
+    @State private var alertMessage = ""
+    
+    var body: some View {
+        NavigationView {
+            VStack {
+                if isGeneratingPDF {
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Generating PDF...")
+                            .font(.headline)
+                        Text("Please wait while we create your meal plan document")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let pdfDocument = pdfDocument {
+                    VStack {
+                        // PDF Preview
+                        PDFKitView(pdfDocument: pdfDocument)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .border(Color.gray.opacity(0.3), width: 1)
+                        
+                        // Action buttons
+                        VStack(spacing: 12) {
+                            Text("Your meal plan PDF is ready!")
+                                .font(.headline)
+                                .foregroundColor(.green)
+                            
+                            HStack(spacing: 16) {
+                                Button(action: sharePDF) {
+                                    HStack {
+                                        Image(systemName: "square.and.arrow.up")
+                                        Text("Save/Share PDF")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                
+                                Button(action: generatePDF) {
+                                    HStack {
+                                        Image(systemName: "arrow.clockwise")
+                                        Text("Regenerate")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            
+                            Text("Tap 'Save/Share PDF' to save to Files, email, or share with other apps")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .padding()
+                    }
+                } else {
+                    VStack(spacing: 20) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 60))
+                            .foregroundColor(.blue)
+                        
+                        Text("Ready to Export")
+                            .font(.title2)
+                            .fontWeight(.medium)
+                        
+                        Text("Your weekly meal plan will be exported as a PDF document including all recipes, ingredients, and nutrition information.")
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        
+                        Button("Generate PDF") {
+                            generatePDF()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        
+                        VStack(spacing: 8) {
+                            Text("After generation, you can:")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "folder")
+                                    Text("Save to Files app")
+                                }
+                                HStack {
+                                    Image(systemName: "envelope")
+                                    Text("Email the PDF")
+                                }
+                                HStack {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("Share with other apps")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                        .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .navigationTitle("Export Meal Plan")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    isPresented = false
+                },
+                trailing: pdfDocument != nil ? Button("Share") {
+                    sharePDF()
+                } : nil
+            )
+            .sheet(isPresented: $showShareSheet) {
+                if let pdfURL = pdfURL {
+                    ShareSheet(activityItems: [pdfURL])
+                }
+            }
+            .alert("PDF Status", isPresented: $showAlert) {
+                Button("OK") { }
+            } message: {
+                Text(alertMessage)
+            }
+        }
+        .onAppear {
+        
+            generatePDF()
+        }
+    }
+    
+    private func generatePDF() {
+        isGeneratingPDF = true
+        pdfDocument = nil // Clear previous document
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let document = pdfGenerator.generatePDF(
+                for: weeklyPlan,
+                weeklyBudget: weeklyBudget,
+                environmentalImpact: environmentalImpact,
+                totalCost: totalCost,
+                optimizationStats: optimizationStats
+            )
+            
+            DispatchQueue.main.async {
+                self.pdfDocument = document
+                self.isGeneratingPDF = false
+                
+                if document == nil {
+                    self.alertMessage = "Failed to generate PDF. Please try again."
+                    self.showAlert = true
+                }
+            }
+        }
+    }
+    
+    private func sharePDF() {
+        guard let pdfDocument = pdfDocument else {
+            alertMessage = "No PDF document available. Please generate first."
+            showAlert = true
+            return
+        }
+        
+        // Create a temporary file with a descriptive name
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: Date())
+        let fileName = "NutriAid_MealPlan_\(dateString).pdf"
+        
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let tempURL = tempDirectory.appendingPathComponent(fileName)
+        
+        do {
+            // Remove existing file if it exists
+            if FileManager.default.fileExists(atPath: tempURL.path) {
+                try FileManager.default.removeItem(at: tempURL)
+            }
+            
+            // Write PDF to temporary location
+            if pdfDocument.write(to: tempURL) {
+                self.pdfURL = tempURL
+                showShareSheet = true
+            } else {
+                alertMessage = "Failed to save PDF. Please try again."
+                showAlert = true
+            }
+        } catch {
+            alertMessage = "Error preparing PDF for sharing: \(error.localizedDescription)"
+            showAlert = true
+        }
+    }
+}
+
+
+struct SmartMealPlannerView: View {
+    @State private var showAlert = false
+    @State private var alertMessage = ""
+    @State private var maxTimeInput = ""
+    @State private var weeklyBudgetInput = ""
+    @State private var dietaryRestrictionsInput = ""
+    @State private var chronicConditionsInput = ""
+    @State private var allergiesInput = ""
+    @State private var ingredientsOnHandInput = ""
+    
+    @State private var weeklyPlan: [[Recipe]] = []
+    @State private var didGeneratePlan = false
+    @State private var showEnvironmentalInfo = false
+    @State private var showPDFExport = false
+    @State private var isGeneratingPlan = false
+    
+    @StateObject private var pdfGenerator = MealPlanPDFGenerator()
+    let allRecipes: [Recipe] = Recipe.sampleRecipes
+    
+    // MARK: - Body
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // App Description Section
+                    appDescriptionSection
+                    
+                    // Preferences Section
+                    preferencesSection
+                    
+                    // Generated Plan Section
+                    if didGeneratePlan {
+                        generatedPlanSection
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("")
+            .navigationBarHidden(true)
+            .background(Color(red: 0.95, green: 0.98, blue: 0.95))
+            .alert("Environmental Impact Explained", isPresented: $showEnvironmentalInfo) {
+                Button("OK") { }
+            } message: {
+                Text("Environmental impact measures the carbon footprint of your meal plan based on the production, transportation, and processing of ingredients.")
+            }
+            .alert("Alert", isPresented: $showAlert) {
+                Button("OK") { }
+            } message: {
+                Text(alertMessage)
+            }
+            .sheet(isPresented: $showPDFExport) {
+                PDFExportView(
+                    weeklyPlan: weeklyPlan,
+                    weeklyBudget: weeklyBudgetInput,
+                    environmentalImpact: totalWeeklyCarbonFootprint(),
+                    totalCost: weeklyTotalCost,
+                    optimizationStats: ingredientOptimizationStats,
+                    pdfGenerator: pdfGenerator,
+                    isPresented: $showPDFExport
+                )
+            }
+        }
+    }
+    
+    // MARK: - View Components
+    private var appDescriptionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "heart.fill")
+                    .foregroundColor(.white)
+                    .font(.title2)
+                Text("Our Table")
+                    .font(.custom("Avenir-Medium", size: 24))
+                    .foregroundColor(.black)
+                    .bold()
+            }
+            
+            Text("Your personalized meal planning assistant that creates sustainable, budget-friendly weekly meal plans tailored to your dietary needs and health conditions.")
+                .font(.custom("Avenir-Medium", size: 16))
+                .foregroundColor(.black)
+                .multilineTextAlignment(.leading)
+            
+            Text("Fill in your preferences below to generate a customized 7-day meal plan with ingredient optimization and environmental impact tracking. Starred fields are required. ")
+                .font(.custom("Avenir-Medium", size: 14))
+                .foregroundColor(.black.opacity(0.9))
+                .multilineTextAlignment(.leading)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 0.7, green: 0.9, blue: 0.7))
+        )
+    }
+    
+    private var preferencesSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Your Preferences")
+                .font(.custom("Avenir-Medium", size: 18))
+                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.4))
+            
+            VStack(alignment: .leading, spacing: 16) {
+                // Input Fields
+                preferenceInputField(title: "Maximum Cook Time", placeholder: "** Enter minutes (e.g., 45)", text: $maxTimeInput, keyboardType: .numberPad)
+                preferenceInputField(title: "Weekly Budget", placeholder: "** Enter amount (e.g., 50.00)", text: $weeklyBudgetInput, keyboardType: .decimalPad)
+                preferenceInputField(title: "Dietary Preferences", placeholder: "e.g., vegan, vegetarian, keto", text: $dietaryRestrictionsInput)
+                preferenceInputField(title: "Food Allergies", placeholder: "e.g., eggs, nuts, dairy", text: $allergiesInput)
+                preferenceInputField(title: "Health Conditions", placeholder: "e.g., diabetes, hypertension", text: $chronicConditionsInput)
+                preferenceInputField(title: "Ingredients You Have", placeholder: "e.g., eggs, bananas, rice", text: $ingredientsOnHandInput)
+                
+                // Action Buttons
+                actionButtons
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(red: 0.9, green: 0.95, blue: 0.9))
+            )
+        }
+    }
+    
+    private var generatedPlanSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Weekly Meal Plan")
+                .font(.custom("Avenir-Medium", size: 18))
+                .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.4))
+            
+            VStack(spacing: 16) {
+                ForEach(0..<7, id: \.self) { day in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Day \(day + 1)")
+                            .font(.custom("Avenir-Medium", size: 18))
+                            .foregroundColor(Color(red: 0.3, green: 0.5, blue: 0.3))
+                        
+                        ForEach(0..<3, id: \.self) { mealIndex in
+                            if day < weeklyPlan.count, mealIndex < weeklyPlan[day].count {
+                                let recipe = weeklyPlan[day][mealIndex]
+                                MealRowView(recipe: recipe, day: day, mealIndex: mealIndex)
+                            } else {
+                                // Show placeholder for missing meals
+                                Text("No meal planned")
+                                    .font(.custom("Avenir-Medium", size: 14))
+                                    .foregroundColor(.gray)
+                                    .italic()
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.white.opacity(0.8))
+                    )
+                }
+                
+                // Stats Boxes
+                statsBox(title: "Environmental Impact",
+                         icon: "leaf.fill",
+                         primaryValue: "\(String(format: "%.1f", totalWeeklyCarbonFootprint())) kg CO2",
+                         secondaryValue: "Impact Level: \(environmentalImpactLevel)",
+                         color: environmentalImpactColor)
+                
+                statsBox(title: "Waste Reduction",
+                         icon: "trash.slash.fill",
+                         primaryValue: "\(String(format: "%.1f", totalWasteReduction)) lbs saved",
+                         secondaryValue: "Rating: \(wasteReductionRating)",
+                         color: wasteReductionColor)
+                
+                optimizationStatsBox
+            }
+        }
+    }
+    
+    // MARK: - Helper Views
+    private func preferenceInputField(title: String, placeholder: String, text: Binding<String>, keyboardType: UIKeyboardType = .default) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.custom("Avenir-Medium", size: 16))
+                .foregroundColor(Color(red: 0.3, green: 0.5, blue: 0.3))
+            TextField(placeholder, text: text)
+                .keyboardType(keyboardType)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .font(.custom("Avenir-Medium", size: 14))
+        }
+    }
+    
+    private var actionButtons: some View {
+        VStack(spacing: 12) {
+            Button(action: generateWeeklyMealPlan) {
+                HStack {
+                    if isGeneratingPlan {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Image(systemName: didGeneratePlan ? "arrow.clockwise" : "sparkles")
+                            .foregroundColor(.white)
+                    }
+                    Text(didGeneratePlan ? "Generate New Plan" : "Generate Meal Plan")
+                        .font(.custom("Avenir-Medium", size: 16))
+                        .foregroundColor(.white)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(red: 0.5, green: 0.7, blue: 0.5))
+                )
+            }
+            .disabled(isGeneratingPlan)
+            
+            if didGeneratePlan {
+                Button(action: { showPDFExport = true }) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(.white)
+                        Text("Export PDF")
+                            .font(.custom("Avenir-Medium", size: 16))
+                            .foregroundColor(.white)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 0.6, green: 0.8, blue: 0.6))
+                    )
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    private func statsBox(title: String, icon: String, primaryValue: String, secondaryValue: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(.white)
+                Text(title)
+                    .font(.custom("Avenir-Medium", size: 16))
+                    .foregroundColor(.white)
+            }
+            
+            Text(primaryValue)
+                .font(.custom("Avenir-Medium", size: 18))
+                .foregroundColor(.white)
+            
+            Text(secondaryValue)
+                .font(.custom("Avenir-Medium", size: 14))
+                .foregroundColor(.white.opacity(0.9))
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 0.7, green: 0.9, blue: 0.7))
+        )
+    }
+    
+    private var optimizationStatsBox: some View {
+        let stats = ingredientOptimizationStats
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "arrow.3.trianglepath")
+                    .foregroundColor(.white)
+                Text("Ingredient Optimization")
+                    .font(.custom("Avenir-Medium", size: 16))
+                    .foregroundColor(.white)
+            }
+            
+            Text("\(String(format: "%.1f", stats.reuseRate * 100))% reuse rate")
+                .font(.custom("Avenir-Medium", size: 18))
+                .foregroundColor(.white)
+            
+            Text("Rating: \(ingredientReuseRating)")
+                .font(.custom("Avenir-Medium", size: 14))
+                .foregroundColor(.white.opacity(0.9))
+            
+            if !stats.mostUsedIngredients.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Most Used Ingredients:")
+                        .font(.custom("Avenir-Medium", size: 14))
+                        .foregroundColor(.white)
+                    
+                    ForEach(stats.mostUsedIngredients.prefix(3), id: \.name) { ingredient in
+                        Text("• \(ingredient.name) (\(ingredient.count)x)")
+                            .font(.custom("Avenir-Medium", size: 12))
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 0.7, green: 0.9, blue: 0.7))
+        )
+    }
+    
+    // MARK: - Computed Properties
+    private func totalWeeklyCarbonFootprint() -> Double {
+        weeklyPlan.flatMap { $0 }.reduce(0) { $0 + $1.totalCarbonFootprint }
+    }
+    
+    private var weeklyTotalCost: Double {
+        weeklyPlan.flatMap { $0 }.reduce(0) { $0 + $1.totalCost }
+    }
+    
+    private var totalWasteReduction: Double {
+        weeklyPlan.flatMap { $0 }.reduce(0) { $0 + $1.totalWasteReduction }
+    }
+    
+    private var environmentalImpactLevel: String {
+        let co2 = totalWeeklyCarbonFootprint()
+        return co2 > 40 ? "High" : co2 >= 20 ? "Medium" : "Low"
+    }
+    
+    private var environmentalImpactColor: Color {
+        let co2 = totalWeeklyCarbonFootprint()
+        return co2 > 40 ? .red : co2 >= 20 ? .orange : .green
+    }
+    
+    private var wasteReductionRating: String {
+        return totalWasteReduction > 5 ? "Excellent" : totalWasteReduction > 2 ? "Good" : "Could Improve"
+    }
+    
+    private var wasteReductionColor: Color {
+        return totalWasteReduction > 5 ? .green : totalWasteReduction > 2 ? .orange : .red
+    }
+    
+    private var ingredientOptimizationStats: (reuseRate: Double, mostUsedIngredients: [(name: String, count: Int)]) {
+        let allRecipesInPlan = weeklyPlan.flatMap { $0 }
+        let allIngredientInstances = allRecipesInPlan.flatMap { $0.ingredients }
+        
+        var ingredientCounts: [String: Int] = [:]
+        for ingredient in allIngredientInstances {
+            ingredientCounts[ingredient.name, default: 0] += 1
+        }
+        
+        let totalInstances = allIngredientInstances.count
+        let uniqueCount = ingredientCounts.count
+        let reuseRate = uniqueCount > 0 ? Double(totalInstances - uniqueCount) / Double(totalInstances) : 0.0
+        
+        let mostUsed = ingredientCounts
+            .filter { $0.value > 1 }
+            .sorted { $0.value > $1.value }
+            .prefix(5)
+            .map { (name: $0.key, count: $0.value) }
+        
+        return (reuseRate: reuseRate, mostUsedIngredients: mostUsed)
+    }
+    
+    private var ingredientReuseRating: String {
+        let rate = ingredientOptimizationStats.reuseRate
+        return rate > 0.3 ? "Excellent" : rate > 0.15 ? "Good" : "Could Improve"
+    }
+    
+    private var ingredientReuseColor: Color {
+        let rate = ingredientOptimizationStats.reuseRate
+        return rate > 0.3 ? .green : rate > 0.15 ? .orange : .red
+    }
+    
+    // MARK: - Meal Plan Generation
+    private func generateWeeklyMealPlan() {
+        guard let maxTime = Int(maxTimeInput), maxTime > 0 else {
+            showAlert(message: "Please enter a valid maximum cook time (must be positive number)")
+            return
+        }
+        
+        guard let budget = Double(weeklyBudgetInput), budget > 0 else {
+            showAlert(message: "Please enter a valid weekly budget (must be positive amount)")
+            return
+        }
+        
+        isGeneratingPlan = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            defer { self.isGeneratingPlan = false }
+            
+            let dietaryRestrictions = self.parseInput(self.dietaryRestrictionsInput)
+            let chronicConditions = self.parseInput(self.chronicConditionsInput)
+            let allergies = self.parseInput(self.allergiesInput)
+            let ingredientsOnHand = Set(self.parseInput(self.ingredientsOnHandInput))
+            
+            // Calculate daily budget allocation
+            let dailyBudget = budget / 7.0
+            
+            var tempPlan: [[Recipe]] = Array(repeating: [], count: 7)
+            var totalCost = 0.0
+            var usedRecipes = Set<String>()
+            var allPlanIngredients = Set<String>()
+            
+            for day in 0..<7 {
+                var dayMeals: [Recipe] = []
+                var dayCost = 0.0
+                
+                for mealType in ["breakfast", "lunch", "dinner"] {
+                    let remainingDailyBudget = dailyBudget - dayCost
+                    
+                    if let recipe = self.selectOptimalRecipe(
+                        for: mealType,
+                        maxTime: maxTime,
+                        budget: remainingDailyBudget,
+                        dietaryRestrictions: dietaryRestrictions,
+                        chronicConditions: chronicConditions,
+                        allergies: allergies,
+                        ingredientsOnHand: ingredientsOnHand,
+                        usedRecipes: usedRecipes,
+                        existingIngredients: allPlanIngredients
+                    ) {
+                        dayMeals.append(recipe)
+                        usedRecipes.insert(recipe.name)
+                        dayCost += recipe.totalCost
+                        totalCost += recipe.totalCost
+                        
+                        recipe.ingredients.forEach {
+                            allPlanIngredients.insert($0.name.lowercased())
+                        }
+                    }
+                }
+                
+                tempPlan[day] = dayMeals
+            }
+            
+            if tempPlan.flatMap({ $0 }).isEmpty {
+                self.showAlert(message: "No recipes found matching your criteria. Try adjusting your preferences.")
+            } else {
+                self.weeklyPlan = tempPlan
+                self.didGeneratePlan = true
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    private func parseInput(_ input: String) -> [String] {
+        input.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    }
+    
+    private func selectOptimalRecipe(
+        for mealType: String,
+        maxTime: Int,
+        budget: Double,
+        dietaryRestrictions: [String],
+        chronicConditions: [String],
+        allergies: [String],
+        ingredientsOnHand: Set<String>,
+        usedRecipes: Set<String>,
+        existingIngredients: Set<String>
+    ) -> Recipe? {
+        
+        let filteredRecipes = allRecipes.filter { recipe in
+            // Corrected meal type check - now using recipe.mealType
+            let matchesMealType = recipe.mealType.lowercased() == mealType.lowercased()
+            let withinTime = recipe.cookTime <= maxTime
+            let withinBudget = recipe.totalCost <= budget
+            let notUsed = !usedRecipes.contains(recipe.name)
+            let matchesDiet = dietaryRestrictions.isEmpty ||
+                dietaryRestrictions.allSatisfy { recipe.dietaryTags.map { $0.lowercased() }.contains($0) }
+            let avoidsConditions = chronicConditions.isEmpty ||
+                !chronicConditions.contains(where: { recipe.chronicConditionAvoid.map { $0.lowercased() }.contains($0) })
+            let avoidsAllergens = allergies.isEmpty || !recipeContainsAllergens(recipe, allergens: allergies)
+            
+            return matchesMealType && withinTime && withinBudget && notUsed &&
+                matchesDiet && avoidsConditions && avoidsAllergens
+        }
+        
+        guard !filteredRecipes.isEmpty else { return nil }
+        
+        let scoredRecipes = filteredRecipes.map { recipe -> (recipe: Recipe, score: Double) in
+            let recipeIngredients = Set(recipe.ingredients.map { $0.name.lowercased() })
+            
+            // Scoring components
+            let onHandScore = ingredientsOnHand.isEmpty ? 0 :
+                Double(recipeIngredients.intersection(ingredientsOnHand).count) * 2.0
+            
+            let reuseScore = calculateOverlapScore(recipe, with: existingIngredients) * 1.5
+            let costScore = (1.0 / (recipe.totalCost + 0.1)) * 0.5
+            let spoilageScore = (1.0 - recipe.averageSpoilageRisk) * 0.3
+            let commonalityScore = calculateIngredientCommonality(recipeIngredients, in: filteredRecipes) * 0.2
+            
+            let totalScore = onHandScore + reuseScore + costScore + spoilageScore + commonalityScore
+            
+            return (recipe: recipe, score: totalScore)
+        }
+        
+        return scoredRecipes.max(by: { $0.score < $1.score })?.recipe
+    }
+    
+    private func recipeContainsAllergens(_ recipe: Recipe, allergens: [String]) -> Bool {
+        guard !allergens.isEmpty else { return false }
+        return recipe.ingredients.contains { ingredient in
+            allergens.contains { allergen in
+                ingredient.name.lowercased().contains(allergen)
+            }
+        }
+    }
+    
+    private func calculateOverlapScore(_ recipe: Recipe, with ingredients: Set<String>) -> Double {
+        let recipeIngredients = Set(recipe.ingredients.map { $0.name.lowercased() })
+        let overlap = recipeIngredients.intersection(ingredients)
+        return recipeIngredients.isEmpty ? 0 : Double(overlap.count) / Double(recipeIngredients.count)
+    }
+    
+    private func calculateIngredientCommonality(_ ingredients: Set<String>, in recipes: [Recipe]) -> Double {
+        var totalCommonality = 0.0
+        for ingredient in ingredients {
+            let count = recipes.reduce(0) { count, recipe in
+                count + (recipe.ingredients.contains { $0.name.lowercased() == ingredient } ? 1 : 0)
+            }
+            totalCommonality += Double(count)
+        }
+        return ingredients.isEmpty ? 0 : totalCommonality / Double(ingredients.count)
+    }
+    
+    private func showAlert(message: String) {
+        DispatchQueue.main.async {
+            self.alertMessage = message
+            self.showAlert = true
+        }
+    }
+}
+
+// MARK: - MealRowView
+struct MealRowView: View {
+    let recipe: Recipe
+    let day: Int
+    let mealIndex: Int
+    @State private var showRecipeDirections = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text(recipe.name)
+                            .font(.custom("Avenir-Medium", size: 16))
+                            .bold()
+                            .foregroundColor(Color(red: 0.3, green: 0.5, blue: 0.3))
+                        Text(recipe.dietaryEmoji)
+                            .font(.title2)
+                    }
+                    Text("Cook Time: \(recipe.cookTime) mins")
+                        .font(.custom("Avenir-Medium", size: 14))
+                        .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.4))
+                    Text(String(format: "Cost: $%.2f", recipe.totalCost))
+                        .font(.custom("Avenir-Medium", size: 14))
+                        .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.4))
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    showRecipeDirections = true
+                }) {
+                    HStack {
+                        Image(systemName: "book.circle.fill")
+                            .foregroundColor(.white)
+                        Text("Recipe")
+                            .font(.custom("Avenir-Medium", size: 14))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(red: 0.5, green: 0.7, blue: 0.5))
+                    .cornerRadius(8)
+                }
+            }
+            
+            DisclosureGroup("Ingredients") {
+                ForEach(recipe.ingredients, id: \.name) { ingredient in
+                    Text(ingredient.name)
+                        .font(.custom("Avenir-Medium", size: 13))
+                        .foregroundColor(Color(red: 0.4, green: 0.6, blue: 0.4))
+                }
+            }
+            .font(.custom("Avenir-Medium", size: 14))
+            .foregroundColor(Color(red: 0.3, green: 0.5, blue: 0.3))
+        }
+        .padding(.bottom, 5)
+        .sheet(isPresented: $showRecipeDirections) {
+            RecipeDirectionsView(recipe: recipe, isPresented: $showRecipeDirections)
+        }
+    }
+}
