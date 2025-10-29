@@ -1,0 +1,229 @@
+
+import SwiftUI
+
+struct FoodWasteDiversionView: View {
+    @State private var selectedIngredient = "Select an ingredient"
+    @State private var tips: [String] = []
+    @State private var recipes: [String] = []
+    
+    let commonLeftovers = [
+        "Select an ingredient",
+        "Broccoli stems",
+        "Carrot tops",
+        "Celery leaves",
+        "Banana peels",
+        "Stale bread",
+        "Leftover rice",
+        "Wilted herbs",
+        "Overripe tomatoes",
+        "Potato peels",
+        "Onion scraps",
+        "Lemon peels",
+        "Apple cores",
+        "Cauliflower leaves",
+        "Beet greens"
+    ]
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Custom styled dropdown
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Choose your leftover ingredient:")
+                                .font(.custom("Avenir-Medium", size: 16))
+                                .foregroundColor(.primary)
+                            
+                            Menu {
+                                ForEach(commonLeftovers, id: \.self) { ingredient in
+                                    Button(ingredient) {
+                                        selectedIngredient = ingredient
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Text(selectedIngredient)
+                                        .font(.custom("Avenir-Medium", size: 16))
+                                        .foregroundColor(selectedIngredient == "Select an ingredient" ? .secondary : .primary)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.down")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.white)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.3), lineWidth: 1)
+                                        )
+                                )
+                            }
+                        }
+                        
+                        Button("Get Tips & Recipes") {
+                            if selectedIngredient != "Select an ingredient" {
+                                generateSuggestions(for: selectedIngredient)
+                            }
+                        }
+                        .font(.custom("Avenir-Medium", size: 16))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(red: 0.3, green: 0.5, blue: 0.3))
+                                .shadow(color: Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.3), radius: 4, x: 0, y: 2)
+                        )
+                        .disabled(selectedIngredient == "Select an ingredient")
+                        .opacity(selectedIngredient == "Select an ingredient" ? 0.6 : 1.0)
+                        
+                        if !recipes.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Suggested Recipes:")
+                                    .font(.custom("Avenir-Medium", size: 18))
+                                    .foregroundColor(.primary)
+                                
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(recipes, id: \.self) { recipe in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Circle()
+                                                .fill(Color(red: 0.3, green: 0.5, blue: 0.3))
+                                                .frame(width: 6, height: 6)
+                                                .padding(.top, 6)
+                                            
+                                            Text(recipe)
+                                                .font(.custom("Avenir-Medium", size: 15))
+                                                .foregroundColor(.primary)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                    }
+                                }
+                                .padding(16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.1))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.2), lineWidth: 1)
+                                        )
+                                )
+                            }
+                        }
+                        
+                        if !tips.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Shelf-Life Extension Tips:")
+                                    .font(.custom("Avenir-Medium", size: 18))
+                                    .foregroundColor(.primary)
+                                
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(tips, id: \.self) { tip in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Circle()
+                                                .fill(Color(red: 0.3, green: 0.5, blue: 0.3))
+                                                .frame(width: 6, height: 6)
+                                                .padding(.top, 6)
+                                            
+                                            Text(tip)
+                                                .font(.custom("Avenir-Medium", size: 15))
+                                                .foregroundColor(.primary)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                    }
+                                }
+                                .padding(16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.1))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.2), lineWidth: 1)
+                                        )
+                                )
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .frame(maxWidth: 600)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.05),
+                        Color(red: 0.3, green: 0.5, blue: 0.3).opacity(0.1)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .navigationTitle("Food Waste Diversion")
+            .navigationBarTitleDisplayMode(.large)
+        }
+    }
+    
+    // FIXED: Moved the function inside the struct and removed 'private' since it's now a method
+    private func generateSuggestions(for ingredient: String) {
+        // Reset arrays
+        tips = []
+        recipes = []
+        
+        // Logic based on ingredient selection
+        if ingredient.lowercased().contains("broccoli") {
+            tips = ["Store stems in water like flowers", "Peel and slice stems for stir-fry"]
+            recipes = ["Broccoli Stem Slaw", "Broccoli Stem Stir-Fry"]
+        } else if ingredient.lowercased().contains("rice") {
+            tips = ["Store in airtight container in fridge", "Use within 3 days"]
+            recipes = ["Fried Rice", "Rice Pudding"]
+        } else if ingredient.lowercased().contains("bread") {
+            tips = ["Spritz the bread with water, wrap in aluminium foil, and heat in the oven for 10 mins at 300°F"]
+            recipes = ["French Toast", "Croutons"]
+        } else if ingredient.lowercased().contains("spinach") {
+            tips = ["Freeze in portion-sized bags for later use", "Place paper towels in the bag to absorb moisture and preserve"]
+            recipes = ["Pasta Sauce", "Sauteed Spinach", "Creamed Spinach"]
+        } else if ingredient.lowercased().contains("potato") {
+            tips = ["Store in coldest part of fridge"]
+            recipes = ["Potato Pancakes", "Potato Salad", "Potato Soup"]
+        } else if ingredient.lowercased().contains("carrot") {
+            tips = ["Carrot tops can be stored in water like herbs", "Use carrot tops within 2-3 days for best flavor"]
+            recipes = ["Carrot Top Pesto", "Carrot Top Chimichurri", "Carrot Top Soup"]
+        } else if ingredient.lowercased().contains("celery") {
+            tips = ["Store celery leaves in damp paper towels", "Celery leaves have more flavor than stalks"]
+            recipes = ["Celery Leaf Salad", "Celery Leaf Seasoning", "Celery Leaf Soup Stock"]
+        } else if ingredient.lowercased().contains("banana") {
+            tips = ["Banana peels can be composted or used as fertilizer", "Clean thoroughly before use"]
+            recipes = ["Banana Peel Smoothie", "Banana Peel Curry", "Banana Peel Fertilizer Tea"]
+        } else if ingredient.lowercased().contains("herb") {
+            tips = ["Freeze herbs in ice cube trays with oil", "Dry herbs by hanging in bundles"]
+            recipes = ["Herb Oil", "Herb Salt", "Herb Butter"]
+        } else if ingredient.lowercased().contains("tomato") {
+            tips = ["Use overripe tomatoes for sauces", "Store at room temperature to ripen further"]
+            recipes = ["Tomato Sauce", "Tomato Soup", "Roasted Tomato Pasta"]
+        } else if ingredient.lowercased().contains("onion") {
+            tips = ["Save onion scraps for vegetable stock", "Store in freezer until ready to use"]
+            recipes = ["Vegetable Stock", "Onion Soup", "Caramelized Onion Dip"]
+        } else if ingredient.lowercased().contains("lemon") {
+            tips = ["Zest lemons before juicing", "Freeze lemon peels for future use"]
+            recipes = ["Lemon Zest Seasoning", "Candied Lemon Peel", "Lemon Peel Tea"]
+        } else if ingredient.lowercased().contains("apple") {
+            tips = ["Apple cores can be used for pectin", "Save cores for composting"]
+            recipes = ["Apple Core Jelly", "Apple Scrap Vinegar", "Apple Core Syrup"]
+        } else if ingredient.lowercased().contains("cauliflower") {
+            tips = ["Cauliflower leaves are completely edible", "Use leaves like any other green"]
+            recipes = ["Roasted Cauliflower Leaves", "Cauliflower Leaf Chips", "Cauliflower Leaf Stir-Fry"]
+        } else if ingredient.lowercased().contains("beet") {
+            tips = ["Beet greens are more nutritious than the root", "Use beet greens within 2-3 days"]
+            recipes = ["Sauteed Beet Greens", "Beet Green Smoothie", "Beet Green Salad"]
+        } else {
+            tips = ["No tips found — try another ingredient"]
+            recipes = ["No recipes found"]
+        }
+    }
+}
